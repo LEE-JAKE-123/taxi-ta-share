@@ -239,6 +239,25 @@ export async function closeTripAction(formData: FormData) {
   )
 }
 
+export async function closeTripFromRoomAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = text(formData, 'tripId')
+  const idempotencyKey = text(formData, 'idempotencyKey')
+
+  if (!isUuid(tripId)) {
+    redirect(`/home?error=${encodeURIComponent('올바르지 않은 방 식별자입니다.')}`)
+  }
+  if (!isUuid(idempotencyKey)) {
+    completeRoom(tripId, '요청 식별자가 올바르지 않습니다.', true)
+  }
+
+  await executeRoom(
+    tripId,
+    () => closeTrip(user.userId, tripId, idempotencyKey),
+    '모집을 종료했습니다. 확정 인원이 2명 이상이면 포인트 예치를 진행해 주세요.',
+  )
+}
+
 export async function cancelTripAction(formData: FormData) {
   const user = await requireCompleteUser()
   await execute(
@@ -257,6 +276,25 @@ export async function depositAction(formData: FormData) {
   await execute(
     () => confirmTripAndDeposit(user.userId, text(formData, 'tripId'), text(formData, 'idempotencyKey')),
     '모집 확정과 예치를 완료했습니다.',
+  )
+}
+
+export async function confirmTripAndDepositFromRoomAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = text(formData, 'tripId')
+  const idempotencyKey = text(formData, 'idempotencyKey')
+
+  if (!isUuid(tripId)) {
+    redirect(`/home?error=${encodeURIComponent('올바르지 않은 방 식별자입니다.')}`)
+  }
+  if (!isUuid(idempotencyKey)) {
+    completeRoom(tripId, '요청 식별자가 올바르지 않습니다.', true)
+  }
+
+  await executeRoom(
+    tripId,
+    () => confirmTripAndDeposit(user.userId, tripId, idempotencyKey),
+    '모집을 확정하고 전원 포인트 예치를 완료했습니다. 이제 출발할 수 있습니다.',
   )
 }
 

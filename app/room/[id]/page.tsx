@@ -5,6 +5,8 @@ import { Clock, MapPin, Play, ShieldCheck, UsersRound } from 'lucide-react'
 import {
   approveFromRoomAction,
   applyFromRoomAction,
+  closeTripFromRoomAction,
+  confirmTripAndDepositFromRoomAction,
   setDesignatedFareSubmitterAction,
   startTripFromRoomAction,
 } from '@/app/core/actions'
@@ -161,7 +163,7 @@ export default async function RoomDetailPage({
           )}
         </Card>
 
-        {isHost ? (
+        {isHost && room.status === 'OPEN' ? (
           <Card className="gap-3">
             <CardTitle>참여 신청 관리</CardTitle>
             <p className="text-xs text-muted-foreground">
@@ -254,6 +256,27 @@ export default async function RoomDetailPage({
           )}
         </Card>
 
+        {isHost && room.status === 'CLOSED' ? (
+          <Card className="gap-3">
+            <CardTitle>모집 마감 · 예치 진행</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              확정된 참여자 전원의 예상 요금 포인트를 예치하면 모집이 확정되고 출발할 수 있습니다.
+            </p>
+            <p className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+              한 명이라도 잔액이 부족하거나 요금을 다시 계산할 수 없으면 예치와 상태 변경은 모두 취소됩니다.
+            </p>
+          </Card>
+        ) : null}
+
+        {isHost && room.status === 'EXPIRED' ? (
+          <Card className="gap-3">
+            <CardTitle>모집이 종료되었습니다</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              확정 인원이 2명에 미달해 이 방은 출발할 수 없습니다.
+            </p>
+          </Card>
+        ) : null}
+
         {isHost && room.status === 'CONFIRMED' ? (
           <form action={setDesignatedFareSubmitterAction}>
             <Card className="gap-3">
@@ -294,7 +317,38 @@ export default async function RoomDetailPage({
         ) : null}
       </main>
 
-      {isHost && room.status === 'CONFIRMED' ? (
+      {isHost && room.status === 'OPEN' ? (
+        <BottomBar>
+          <form action={closeTripFromRoomAction}>
+            <input type="hidden" name="tripId" value={room.tripId} />
+            <input
+              type="hidden"
+              name="idempotencyKey"
+              value={randomUUID()}
+            />
+            <PendingSubmitButton
+              pendingLabel="모집을 종료하는 중…"
+              disabled={!departureOpen}
+            >
+              모집 종료
+            </PendingSubmitButton>
+          </form>
+        </BottomBar>
+      ) : isHost && room.status === 'CLOSED' ? (
+        <BottomBar>
+          <form action={confirmTripAndDepositFromRoomAction}>
+            <input type="hidden" name="tripId" value={room.tripId} />
+            <input
+              type="hidden"
+              name="idempotencyKey"
+              value={randomUUID()}
+            />
+            <PendingSubmitButton pendingLabel="전원 포인트를 예치하는 중…">
+              모집 확정 · 전원 예치
+            </PendingSubmitButton>
+          </form>
+        </BottomBar>
+      ) : isHost && room.status === 'CONFIRMED' ? (
         <BottomBar>
           <form action={startTripFromRoomAction}>
             <input type="hidden" name="tripId" value={room.tripId} />

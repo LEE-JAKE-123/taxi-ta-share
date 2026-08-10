@@ -5,6 +5,7 @@ import { Clock, MapPin, Play, ShieldCheck, UsersRound } from 'lucide-react'
 import {
   approveFromRoomAction,
   applyFromRoomAction,
+  setDesignatedFareSubmitterAction,
   startTripFromRoomAction,
 } from '@/app/core/actions'
 import { ArrivalSettlementControl } from '@/components/arrival-settlement-control'
@@ -67,6 +68,9 @@ export default async function RoomDetailPage({
     ['DEPOSITED', 'CHECKED_IN', 'NO_SHOW', 'COMPLETED'].includes(
       room.currentUserStatus ?? '',
     )
+  const canSubmitFare =
+    room.status === 'IN_PROGRESS' &&
+    (isHost || room.fareSubmitterUserId === user.userId)
 
   return (
     <MobileShell withTabBar={false}>
@@ -225,10 +229,20 @@ export default async function RoomDetailPage({
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                     {isHost ? participant.name : maskName(participant.name)}
                   </span>
-                  <StatusBadge tone={participant.role === 'HOST' ? 'brand' : 'muted'}>
-                    {participant.role === 'HOST'
-                      ? '방장'
-                      : participantStatusLabel(participant.status)}
+                  <StatusBadge
+                    tone={
+                      participant.userId === room.fareSubmitterUserId
+                        ? 'info'
+                        : participant.role === 'HOST'
+                          ? 'brand'
+                          : 'muted'
+                    }
+                  >
+                    {participant.userId === room.fareSubmitterUserId
+                      ? '요금 입력자'
+                      : participant.role === 'HOST'
+                        ? '방장'
+                        : participantStatusLabel(participant.status)}
                   </StatusBadge>
                 </li>
               ))}
@@ -239,6 +253,45 @@ export default async function RoomDetailPage({
             </p>
           )}
         </Card>
+
+        {isHost && room.status === 'CONFIRMED' ? (
+          <form action={setDesignatedFareSubmitterAction}>
+            <Card className="gap-3">
+              <CardTitle>실제 요금 입력자</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                방장은 항상 입력할 수 있습니다. 필요하면 예치를 마친 참여자 한 명을
+                추가로 지정해 주세요.
+              </p>
+              <label htmlFor="fare-submitter" className="text-sm font-semibold">
+                지정 참여자
+              </label>
+              <select
+                id="fare-submitter"
+                name="submitterId"
+                defaultValue={room.fareSubmitterUserId ?? ''}
+                className="app-input"
+              >
+                <option value="">방장이 직접 입력</option>
+                {confirmedParticipants
+                  .filter(
+                    (participant) =>
+                      participant.role === 'MEMBER' &&
+                      participant.status === 'DEPOSITED',
+                  )
+                  .map((participant) => (
+                    <option key={participant.userId} value={participant.userId}>
+                      {participant.name}
+                    </option>
+                  ))}
+              </select>
+              <input type="hidden" name="tripId" value={room.tripId} />
+              <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+              <PendingSubmitButton pendingLabel="입력자 지정 중...">
+                실제 요금 입력자 저장
+              </PendingSubmitButton>
+            </Card>
+          </form>
+        ) : null}
       </main>
 
       {isHost && room.status === 'CONFIRMED' ? (
@@ -256,9 +309,12 @@ export default async function RoomDetailPage({
             </PendingSubmitButton>
           </form>
         </BottomBar>
-      ) : isHost && room.status === 'IN_PROGRESS' ? (
+      ) : canSubmitFare ? (
         <BottomBar className="flex flex-col gap-2">
-          <ArrivalSettlementControl tripId={room.tripId} />
+          <ArrivalSettlementControl
+            tripId={room.tripId}
+            isDesignated={!isHost}
+          />
           <Link
             href={`/room/${room.tripId}/gathering`}
             className="flex min-h-12 items-center justify-center rounded-full border border-border bg-background px-6 py-3 text-[17px]"

@@ -105,6 +105,46 @@ export async function getAdminOperationsDashboard(actorId: string) {
   }
 }
 
+export async function getAdminFareDisputes(actorId: string) {
+  const sql = await requireAdminActor(actorId)
+  const rows = await sql`
+    SELECT
+      d.dispute_id AS "disputeId",
+      d.trip_id AS "tripId",
+      d.reason,
+      d.submitted_at AS "submittedAt",
+      u.name AS "participantName",
+      u.student_id AS "participantStudentId",
+      g.origin,
+      g.destination,
+      s.actual_fare AS "actualFare",
+      s.final_share AS "finalShare",
+      s.confirmation_deadline AS "confirmationDeadline"
+    FROM fare_disputes d
+    JOIN users u ON u.user_id = d.user_id
+    JOIN trip_groups g ON g.trip_id = d.trip_id
+    JOIN trip_settlements s ON s.trip_id = d.trip_id
+    WHERE d.status = 'OPEN'
+      AND g.status = 'SETTLEMENT_PENDING'
+      AND s.status = 'PENDING_CONFIRMATION'
+    ORDER BY d.submitted_at ASC
+    LIMIT 100
+  `
+  return rows as unknown as Array<{
+    disputeId: string
+    tripId: string
+    reason: string
+    submittedAt: string
+    participantName: string
+    participantStudentId: string
+    origin: string
+    destination: string
+    actualFare: number
+    finalShare: number
+    confirmationDeadline: string
+  }>
+}
+
 export async function getAdminUsers(actorId: string) {
   const sql = await requireAdminActor(actorId)
   const rows = await sql`

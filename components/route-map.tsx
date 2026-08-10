@@ -32,6 +32,7 @@ export function RouteMap({
   const container = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string>()
   const [loaded, setLoaded] = useState(false)
+  const [retryNonce, setRetryNonce] = useState(0)
   const key = process.env.NEXT_PUBLIC_KAKAO_MAP_JS_KEY
   const visibleError = key
     ? error
@@ -88,7 +89,14 @@ export function RouteMap({
       script.removeEventListener('load', onLoad)
       script.removeEventListener('error', onError)
     }
-  }, [destination, key, origin])
+  }, [destination, key, origin, retryNonce])
+
+  function retryMapLoad() {
+    document.querySelector('script[data-taxi-kakao-map]')?.remove()
+    setLoaded(false)
+    setError(undefined)
+    setRetryNonce((value) => value + 1)
+  }
 
   return (
     <div
@@ -99,9 +107,20 @@ export function RouteMap({
     >
       <div ref={container} className="absolute inset-0" aria-label="출발지와 목적지 지도" />
       {visibleError ? (
-        <p className="absolute inset-0 grid place-items-center bg-muted p-5 text-center text-sm text-muted-foreground" role="status">
-          {visibleError}
-        </p>
+        <div className="absolute inset-0 grid place-items-center bg-muted p-5 text-center text-sm text-muted-foreground" role="alert">
+          <div>
+            <p>{visibleError}</p>
+            {key ? (
+              <button
+                type="button"
+                onClick={retryMapLoad}
+                className="mt-3 min-h-10 rounded-lg border border-border bg-background px-3 font-semibold text-foreground"
+              >
+                다시 시도
+              </button>
+            ) : null}
+          </div>
+        </div>
       ) : !origin && !destination ? (
         <p className="absolute inset-0 grid place-items-center p-5 text-center text-sm text-muted-foreground">
           장소를 선택하면 지도에 표시됩니다.

@@ -39,6 +39,7 @@ type TripRow = {
   originLongitude: number | null
   destinationLatitude: number | null
   destinationLongitude: number | null
+  fareSubmitterUserId: string | null
 }
 
 export async function getCoreDashboard(userId: string, isAdmin: boolean) {
@@ -65,6 +66,7 @@ export async function getCoreDashboard(userId: string, isAdmin: boolean) {
           g.origin_longitude::float8 AS "originLongitude",
           g.destination_latitude::float8 AS "destinationLatitude",
           g.destination_longitude::float8 AS "destinationLongitude",
+          g.fare_submitter_user_id AS "fareSubmitterUserId",
           g.status,
           count(p.user_id) FILTER (
             WHERE p.status IN (
@@ -221,8 +223,22 @@ export async function getTripJourney(userId: string, tripId: string) {
           s.final_share AS "finalShare",
           s.participant_count AS "participantCount",
           s.status,
+          s.confirmation_deadline AS "confirmationDeadline",
+          s.confirmation_deadline <= now() AS "confirmationExpired",
           count(c.user_id)::int AS "confirmationCount",
           bool_or(c.user_id = ${userId}) AS "currentUserConfirmed",
+          EXISTS (
+            SELECT 1
+            FROM fare_disputes d
+            WHERE d.trip_id = s.trip_id
+              AND d.user_id = ${userId}
+              AND d.status = 'OPEN'
+          ) AS "currentUserHasOpenDispute",
+          (
+            SELECT count(*)::int
+            FROM fare_disputes d
+            WHERE d.trip_id = s.trip_id AND d.status = 'OPEN'
+          ) AS "openDisputeCount",
           s.settled_at AS "settledAt"
         FROM trip_settlements s
         LEFT JOIN fare_confirmations c ON c.trip_id = s.trip_id
@@ -279,8 +295,12 @@ export async function getTripJourney(userId: string, tripId: string) {
           finalShare: number
           participantCount: number
           status: string
+          confirmationDeadline: string
+          confirmationExpired: boolean
           confirmationCount: number
           currentUserConfirmed: boolean
+          currentUserHasOpenDispute: boolean
+          openDisputeCount: number
           settledAt: string | null
         }
       | undefined,
@@ -1481,6 +1501,76 @@ export async function startTrip(
   })
 }
 
+export async function setDesignatedFareSubmitter(input: {
+  actorId: string
+  tripId: string
+  submitterId: string | null
+  idempotencyKey: string
+}) {
+  if (
+    !isPointRequestUuid(input.actorId) ||
+    !isPointRequestUuid(input.tripId) ||
+    !isPointRequestUuid(input.idempotencyKey) ||
+    (input.submitterId !== null && !isPointRequestUuid(input.submitterId))
+  ) {
+    throw new CoreError('실제 요금 입력자 지정 요청 식별자가 올바르지 않습니다.')
+  }
+  await inTransaction(async (client) => {
+    const trip = await client.query(
+      `SELECT host_user_id, status, fare_submitter_user_id,
+              fare_submitter_set_by, fare_submitter_idempotency_key
+       FROM trip_groups
+       WHERE trip_id = $1
+       FOR UPDATE`,
+      [input.tripId],
+    )
+    const row = trip.rows[0]
+    if (!row || row.host_user_id !== input.actorId) {
+      throw new CoreError('방장만 실제 요금 입력자를 지정할 수 있습니다.')
+    }
+    if (
+      row.fare_submitter_set_by === input.actorId &&
+      row.fare_submitter_idempotency_key === input.idempotencyKey &&
+      row.fare_submitter_user_id === input.submitterId
+    ) {
+      return
+    }
+    if (row.status !== 'CONFIRMED') {
+      throw new CoreError('출발 전 예치가 완료된 확정 방에서만 입력자를 지정할 수 있습니다.')
+    }
+    if (input.submitterId === input.actorId) {
+      throw new CoreError('방장은 기본 실제 요금 입력자이므로 별도 지정할 필요가 없습니다.')
+    }
+    if (input.submitterId) {
+      const participant = await client.query(
+        `SELECT 1
+         FROM trip_participants p
+         JOIN trip_deposits d
+           ON d.trip_id = p.trip_id AND d.user_id = p.user_id
+         WHERE p.trip_id = $1
+           AND p.user_id = $2
+           AND p.role = 'MEMBER'
+           AND p.status = 'DEPOSITED'
+         FOR UPDATE OF p, d`,
+        [input.tripId, input.submitterId],
+      )
+      if (!participant.rowCount) {
+        throw new CoreError('예치를 마친 확정 참여자만 실제 요금 입력자로 지정할 수 있습니다.')
+      }
+    }
+    await client.query(
+      `UPDATE trip_groups
+       SET fare_submitter_user_id = $2,
+           fare_submitter_set_by = $3,
+           fare_submitter_idempotency_key = $4,
+           fare_submitter_set_at = now(),
+           updated_at = now()
+       WHERE trip_id = $1`,
+      [input.tripId, input.submitterId, input.actorId, input.idempotencyKey],
+    )
+  })
+}
+
 export async function checkInParticipant(
   actorId: string,
   tripId: string,
@@ -1589,58 +1679,128 @@ export async function submitActualFare(input: {
   positiveInteger(input.actualFare, '실제 요금')
   await inTransaction(async (client) => {
     const trip = await client.query(
-      `SELECT host_user_id, status FROM trip_groups WHERE trip_id = $1 FOR UPDATE`,
+      `SELECT host_user_id, status, fare_submitter_user_id
+       FROM trip_groups
+       WHERE trip_id = $1
+       FOR UPDATE`,
       [input.tripId],
     )
     const row = trip.rows[0]
-    if (!row || row.host_user_id !== input.actorId) throw new CoreError('방장만 실제 요금을 입력할 수 있습니다.')
+    if (
+      !row ||
+      (row.host_user_id !== input.actorId &&
+        row.fare_submitter_user_id !== input.actorId)
+    ) {
+      throw new CoreError('방장 또는 지정된 참여자만 실제 요금을 입력할 수 있습니다.')
+    }
     const replay = await client.query(
-      `SELECT actual_fare, submitted_by, fare_submission_idempotency_key
+      `SELECT actual_fare, submitted_by, fare_submission_idempotency_key,
+              resubmission_required
        FROM trip_settlements
-       WHERE trip_id = $1`,
+       WHERE trip_id = $1
+       FOR UPDATE`,
       [input.tripId],
     )
+    let isResubmission = false
     if (replay.rowCount) {
       const existing = replay.rows[0]
       if (
         existing.submitted_by === input.actorId &&
         existing.fare_submission_idempotency_key === input.idempotencyKey &&
-        Number(existing.actual_fare) === input.actualFare
+        Number(existing.actual_fare) === input.actualFare &&
+        !existing.resubmission_required
       ) {
         return
       }
-      throw new CoreError('이미 실제 요금이 등록되었습니다.')
+      if (!existing.resubmission_required) {
+        throw new CoreError('이미 실제 요금이 등록되었습니다.')
+      }
+      if (row.host_user_id !== input.actorId) {
+        throw new CoreError('수정 실제 요금은 방장만 다시 제출할 수 있습니다.')
+      }
+      isResubmission = true
     }
     if (row.status !== 'IN_PROGRESS') throw new CoreError('이동 시작 후 실제 요금을 입력할 수 있습니다.')
-    const count = await client.query(
-      `SELECT count(*)::int AS count
-       FROM trip_deposits
-       WHERE trip_id = $1`,
+    const cohort = await client.query(
+      `SELECT p.user_id, p.role, p.status, d.amount
+       FROM trip_participants p
+       JOIN trip_deposits d
+         ON d.trip_id = p.trip_id
+        AND d.user_id = p.user_id
+       WHERE p.trip_id = $1
+       ORDER BY p.user_id
+       FOR UPDATE OF p, d`,
       [input.tripId],
     )
-    const participantCount = count.rows[0].count as number
-    if (participantCount < 2) {
+    const participantCount = Number(cohort.rowCount ?? 0)
+    if (participantCount < 2 || participantCount > 4) {
       throw new CoreError('정산 대상 예치 참여자가 2명 이상이어야 합니다.')
     }
+    if (
+      cohort.rows.some(
+        (participant) =>
+          participant.role !== 'HOST' &&
+          !['CHECKED_IN', 'NO_SHOW'].includes(participant.status as string),
+      )
+    ) {
+      throw new CoreError('모든 참여자를 체크인 또는 노쇼로 확정한 뒤 실제 요금을 제출해 주세요.')
+    }
     calculateDemoFinalShare(input.actualFare, participantCount)
+    if (isResubmission) {
+      await client.query(
+        `DELETE FROM fare_confirmations WHERE trip_id = $1`,
+        [input.tripId],
+      )
+      await client.query(
+        `DELETE FROM trip_settlement_participants WHERE trip_id = $1`,
+        [input.tripId],
+      )
+      await client.query(
+        `UPDATE trip_settlements
+         SET actual_fare = $2,
+             final_share = ceil($2::numeric / participant_count)::integer,
+             fare_submission_idempotency_key = $3,
+             submitted_at = now(),
+             confirmation_deadline = now() + interval '24 hours',
+             resubmission_required = false,
+             fare_revision = fare_revision + 1
+         WHERE trip_id = $1`,
+        [input.tripId, input.actualFare, input.idempotencyKey],
+      )
+    } else {
+      await client.query(
+        `INSERT INTO trip_settlements (
+           trip_id, actual_fare, participant_count, final_share, submitted_by,
+           fare_submission_idempotency_key, confirmation_deadline, cohort_basis
+         ) VALUES (
+           $1, $2, $3, ceil($2::numeric / $3)::integer,
+           $4, $5, now() + interval '24 hours', 'ESCROW_CONFIRMED'
+         )`,
+        [input.tripId, input.actualFare, participantCount, input.actorId, input.idempotencyKey],
+      )
+    }
+    for (const participant of cohort.rows) {
+      await client.query(
+        `INSERT INTO trip_settlement_participants (
+           trip_id, user_id, deposit_amount, final_share
+         ) VALUES ($1, $2, $3, ceil($4::numeric / $5)::integer)`,
+        [
+          input.tripId,
+          participant.user_id,
+          participant.amount,
+          input.actualFare,
+          participantCount,
+        ],
+      )
+    }
     await client.query(
-      `INSERT INTO trip_settlements (
-         trip_id, actual_fare, participant_count, final_share, submitted_by,
-         fare_submission_idempotency_key, confirmation_deadline
-       ) VALUES (
-         $1, $2, $3, ceil($2::numeric / $3)::integer,
-         $4, $5, now() + interval '24 hours'
-       )`,
-      [input.tripId, input.actualFare, participantCount, input.actorId, input.idempotencyKey],
+      `UPDATE trip_groups SET status = 'SETTLEMENT_PENDING' WHERE trip_id = $1`,
+      [input.tripId],
     )
     await client.query(
       `INSERT INTO fare_confirmations (trip_id, user_id, idempotency_key)
        VALUES ($1, $2, $3)`,
       [input.tripId, input.actorId, input.idempotencyKey],
-    )
-    await client.query(
-      `UPDATE trip_groups SET status = 'SETTLEMENT_PENDING' WHERE trip_id = $1`,
-      [input.tripId],
     )
   })
 }
@@ -1651,6 +1811,9 @@ export async function arriveAndSettleTrip(
   actualFareText: string,
   idempotencyKey: string,
 ) {
+  throw new CoreError(
+    '즉시 정산은 사용할 수 없습니다. 실제 요금을 제출한 뒤 참여자 확인을 기다려 주세요.',
+  )
   if (!/^\d+$/.test(actualFareText)) {
     throw new CoreError('실제 요금은 숫자만 입력해 주세요.')
   }
@@ -1890,6 +2053,244 @@ export async function arriveAndSettleTrip(
   })
 }
 
+export async function submitFareDispute(input: {
+  actorId: string
+  tripId: string
+  reason: string
+  idempotencyKey: string
+}) {
+  const reason = input.reason.trim()
+  if (!reason || reason.length > 1000) {
+    throw new CoreError('이의제기 사유는 1~1,000자로 입력해 주세요.')
+  }
+
+  await inTransaction(async (client) => {
+    const participant = await client.query(
+      `SELECT s.submitted_by, p.status
+       FROM trip_groups g
+       JOIN trip_settlements s ON s.trip_id = g.trip_id
+       JOIN trip_participants p
+         ON p.trip_id = g.trip_id
+        AND p.user_id = $2
+       JOIN trip_deposits d
+         ON d.trip_id = p.trip_id
+        AND d.user_id = p.user_id
+       WHERE g.trip_id = $1
+         AND g.status = 'SETTLEMENT_PENDING'
+         AND s.status = 'PENDING_CONFIRMATION'
+         AND s.confirmation_deadline > now()
+         AND NOT EXISTS (
+           SELECT 1
+           FROM fare_confirmations c
+           WHERE c.trip_id = g.trip_id AND c.user_id = $2
+         )
+       FOR UPDATE OF g, s, p`,
+      [input.tripId, input.actorId],
+    )
+    const participantRow = participant.rows[0]
+    if (!participantRow || participantRow.submitted_by === input.actorId) {
+      throw new CoreError('실제 요금을 제출하지 않은 정산 참여자만 이의를 제기할 수 있습니다.')
+    }
+
+    const replay = await client.query(
+      `SELECT reason
+       FROM fare_disputes
+       WHERE user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.actorId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      if (replay.rows[0].reason === reason) return
+      throw new CoreError('이미 다른 이의제기에 사용한 요청 키입니다.')
+    }
+
+    const existingOpen = await client.query(
+      `SELECT 1
+       FROM fare_disputes
+       WHERE trip_id = $1 AND user_id = $2 AND status = 'OPEN'
+       FOR UPDATE`,
+      [input.tripId, input.actorId],
+    )
+    if (existingOpen.rowCount) {
+      throw new CoreError('이미 처리 대기 중인 실제 요금 이의제기가 있습니다.')
+    }
+
+    await client.query(
+      `INSERT INTO fare_disputes (
+         trip_id, user_id, reason, idempotency_key
+       ) VALUES ($1, $2, $3, $4)`,
+      [input.tripId, input.actorId, reason, input.idempotencyKey],
+    )
+  })
+}
+
+export async function withdrawFareDispute(input: {
+  actorId: string
+  tripId: string
+  idempotencyKey: string
+}) {
+  if (
+    !isPointRequestUuid(input.actorId) ||
+    !isPointRequestUuid(input.tripId) ||
+    !isPointRequestUuid(input.idempotencyKey)
+  ) {
+    throw new CoreError('이의제기 철회 요청 식별자가 올바르지 않습니다.')
+  }
+  await inTransaction(async (client) => {
+    const dispute = await client.query(
+      `SELECT d.status, d.resolved_by_user_id, d.resolution_idempotency_key,
+              g.status AS trip_status, s.status AS settlement_status,
+              s.confirmation_deadline
+       FROM fare_disputes d
+       JOIN trip_groups g ON g.trip_id = d.trip_id
+       JOIN trip_settlements s ON s.trip_id = d.trip_id
+       WHERE d.trip_id = $1 AND d.user_id = $2
+       FOR UPDATE OF d, g, s`,
+      [input.tripId, input.actorId],
+    )
+    const row = dispute.rows[0]
+    if (
+      row?.status === 'WITHDRAWN' &&
+      row.resolved_by_user_id === input.actorId &&
+      row.resolution_idempotency_key === input.idempotencyKey
+    ) {
+      return
+    }
+    if (
+      !row ||
+      row.status !== 'OPEN' ||
+      row.trip_status !== 'SETTLEMENT_PENDING' ||
+      row.settlement_status !== 'PENDING_CONFIRMATION' ||
+      new Date(row.confirmation_deadline).getTime() <= Date.now()
+    ) {
+      throw new CoreError('확인 기한 안의 열린 이의제기만 철회할 수 있습니다.')
+    }
+    await client.query(
+      `UPDATE fare_disputes
+       SET status = 'WITHDRAWN',
+           resolved_at = now(),
+           resolution_note = '참여자가 이의제기를 철회했습니다.',
+           resolved_by_user_id = $2,
+           resolution_idempotency_key = $3
+       WHERE trip_id = $1 AND user_id = $2`,
+      [input.tripId, input.actorId, input.idempotencyKey],
+    )
+  })
+}
+
+export async function resolveFareDispute(input: {
+  adminId: string
+  tripId: string
+  disputeId: string
+  outcome: 'REJECTED' | 'RESOLVED'
+  resolutionNote: string
+  idempotencyKey: string
+}) {
+  const note = input.resolutionNote.trim()
+  if (!note || note.length > 1000) {
+    throw new CoreError('검토 메모는 1~1,000자로 입력해 주세요.')
+  }
+  if (
+    !isPointRequestUuid(input.adminId) ||
+    !isPointRequestUuid(input.tripId) ||
+    !isPointRequestUuid(input.disputeId) ||
+    !isPointRequestUuid(input.idempotencyKey)
+  ) {
+    throw new CoreError('이의제기 처리 요청 식별자가 올바르지 않습니다.')
+  }
+
+  await inTransaction(async (client) => {
+    const admin = await client.query(
+      `SELECT 1
+       FROM users
+       WHERE user_id = $1 AND role = 'ADMIN' AND account_status = 'ACTIVE'
+       FOR UPDATE`,
+      [input.adminId],
+    )
+    if (!admin.rowCount) throw new CoreError('활성 관리자만 이의제기를 처리할 수 있습니다.')
+
+    const dispute = await client.query(
+      `SELECT d.status, d.resolved_by_user_id, d.resolution_idempotency_key,
+              g.status AS trip_status, s.status AS settlement_status,
+              s.actual_fare
+       FROM fare_disputes d
+       JOIN trip_groups g ON g.trip_id = d.trip_id
+       JOIN trip_settlements s ON s.trip_id = d.trip_id
+       WHERE d.dispute_id = $1 AND d.trip_id = $2
+       FOR UPDATE OF d, g, s`,
+      [input.disputeId, input.tripId],
+    )
+    const row = dispute.rows[0]
+    if (
+      row?.status === input.outcome &&
+      row.resolved_by_user_id === input.adminId &&
+      row.resolution_idempotency_key === input.idempotencyKey
+    ) {
+      return
+    }
+    if (
+      !row ||
+      row.status !== 'OPEN' ||
+      row.trip_status !== 'SETTLEMENT_PENDING' ||
+      row.settlement_status !== 'PENDING_CONFIRMATION'
+    ) {
+      throw new CoreError('열린 정산 대기 이의제기만 처리할 수 있습니다.')
+    }
+
+    if (input.outcome === 'RESOLVED') {
+      const otherOpenDisputes = await client.query(
+        `SELECT 1
+         FROM fare_disputes
+         WHERE trip_id = $1 AND status = 'OPEN' AND dispute_id <> $2
+         FOR UPDATE`,
+        [input.tripId, input.disputeId],
+      )
+      if (otherOpenDisputes.rowCount) {
+        throw new CoreError('수정 요금을 요청하려면 같은 이동의 열린 이의제기를 모두 처리해 주세요.')
+      }
+    }
+
+    const resolutionNote =
+      input.outcome === 'RESOLVED'
+        ? `${note}\n기존 제출 요금: ${Number(row.actual_fare).toLocaleString('ko-KR')}P. 수정 요금 재제출 필요.`
+        : note
+    if (resolutionNote.length > 1000) {
+      throw new CoreError('수정 요금 요청의 검토 메모는 950자 이하로 입력해 주세요.')
+    }
+    await client.query(
+      `UPDATE fare_disputes
+       SET status = $2,
+           resolved_at = now(),
+           resolution_note = $3,
+           resolved_by_user_id = $4,
+           resolution_idempotency_key = $5
+       WHERE dispute_id = $1`,
+      [
+        input.disputeId,
+        input.outcome,
+        resolutionNote,
+        input.adminId,
+        input.idempotencyKey,
+      ],
+    )
+
+    if (input.outcome === 'RESOLVED') {
+      await client.query(
+        `UPDATE trip_settlements
+         SET resubmission_required = true
+         WHERE trip_id = $1`,
+        [input.tripId],
+      )
+      await client.query(
+        `UPDATE trip_groups
+         SET status = 'IN_PROGRESS', updated_at = now()
+         WHERE trip_id = $1`,
+        [input.tripId],
+      )
+    }
+  })
+}
+
 export async function confirmFare(
   actorId: string,
   tripId: string,
@@ -1905,14 +2306,28 @@ export async function confirmFare(
        WHERE g.trip_id = $1 AND g.status = 'SETTLEMENT_PENDING'
          AND p.user_id = $2
          AND p.status IN ('DEPOSITED', 'CHECKED_IN', 'NO_SHOW')
+         AND NOT EXISTS (
+           SELECT 1
+           FROM fare_disputes d
+           WHERE d.trip_id = g.trip_id
+             AND d.user_id = $2
+             AND d.status = 'OPEN'
+         )
        FOR UPDATE OF g`,
       [tripId, actorId],
     )
     if (!participant.rowCount) throw new CoreError('정산 대상 참여자만 요금을 확인할 수 있습니다.')
+    const existingConfirmation = await client.query(
+      `SELECT 1
+       FROM fare_confirmations
+       WHERE trip_id = $1 AND user_id = $2
+       FOR UPDATE`,
+      [tripId, actorId],
+    )
+    if (existingConfirmation.rowCount) return
     await client.query(
       `INSERT INTO fare_confirmations (trip_id, user_id, idempotency_key)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (trip_id, user_id) DO NOTHING`,
+       VALUES ($1, $2, $3)`,
       [tripId, actorId, idempotencyKey],
     )
   })
@@ -1927,7 +2342,7 @@ export async function settleTrip(
     const trip = await client.query(
       `SELECT g.host_user_id, g.status, s.actual_fare, s.final_share,
               s.participant_count, s.status AS settlement_status,
-              s.settlement_idempotency_key
+              s.settlement_idempotency_key, s.confirmation_deadline
        FROM trip_groups g JOIN trip_settlements s ON s.trip_id = g.trip_id
        WHERE g.trip_id = $1 FOR UPDATE OF g, s`,
       [tripId],
@@ -1942,11 +2357,26 @@ export async function settleTrip(
       `SELECT count(*)::int AS count FROM fare_confirmations WHERE trip_id = $1`,
       [tripId],
     )
-    if (confirmations.rows[0].count !== row.participant_count) {
+    const openDisputes = await client.query(
+      `SELECT count(*)::int AS count
+       FROM fare_disputes
+       WHERE trip_id = $1 AND status = 'OPEN'`,
+      [tripId],
+    )
+    if (Number(openDisputes.rows[0].count) > 0) {
+      throw new CoreError('실제 요금 이의제기가 처리되기 전에는 최종 정산할 수 없습니다.')
+    }
+    const allConfirmed = confirmations.rows[0].count === row.participant_count
+    const confirmationExpired = new Date(row.confirmation_deadline).getTime() <= Date.now()
+    if (!allConfirmed && !confirmationExpired) {
       throw new CoreError('모든 확정 참여자가 실제 요금을 확인해야 합니다.')
     }
     const deposits = await client.query(
-      `SELECT user_id, amount FROM trip_deposits WHERE trip_id = $1 ORDER BY user_id FOR UPDATE`,
+      `SELECT user_id, deposit_amount AS amount
+       FROM trip_settlement_participants
+       WHERE trip_id = $1
+       ORDER BY user_id
+       FOR UPDATE`,
       [tripId],
     )
     if (deposits.rowCount !== row.participant_count) {
@@ -1957,15 +2387,30 @@ export async function settleTrip(
       `SELECT user_id FROM users WHERE user_id = ANY($1::uuid[]) ORDER BY user_id FOR UPDATE`,
       [userIds],
     )
-    const extra = Math.max(0, Number(row.final_share) - Number(deposits.rows[0]?.amount ?? 0))
-    if (extra > 0) {
-      const balances = await client.query(
-        `SELECT user_id, available_points FROM point_balances
-         WHERE user_id = ANY($1::uuid[])`,
-        [userIds],
+    const balances = await client.query(
+      `SELECT user_id, available_points
+       FROM point_accounts
+       WHERE user_id = ANY($1::uuid[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      [userIds],
+    )
+    const availableByUser = new Map(
+      balances.rows.map((balance) => [
+        balance.user_id as string,
+        Number(balance.available_points),
+      ]),
+    )
+    for (const deposit of deposits.rows) {
+      const additionalDebit = Math.max(
+        0,
+        Number(row.final_share) - Number(deposit.amount),
       )
-      if (balances.rows.some((balance) => Number(balance.available_points) < extra)) {
-        throw new CoreError(`추가 정산을 위해 각 참여자에게 ${extra.toLocaleString()}P가 필요합니다.`)
+      if (
+        (availableByUser.get(deposit.user_id as string) ?? 0) <
+        additionalDebit
+      ) {
+        throw new CoreError('정산 참여자 중 추가 차감에 필요한 사용 가능 포인트가 부족합니다.')
       }
     }
     for (const deposit of deposits.rows) {

@@ -62,7 +62,7 @@ export default async function SettleCompletePage({
           />
           <Row label="정산 인원" value={`${settlement.participantCount}명`} />
           <Row
-            label="노쇼·미탑승 반환"
+            label="노쇼 인원"
             value={`${noShowCount}명`}
           />
           <Row

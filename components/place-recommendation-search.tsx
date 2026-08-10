@@ -27,6 +27,7 @@ export function PlaceRecommendationSearch() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [searched, setSearched] = useState(false)
+  const [retryNonce, setRetryNonce] = useState(0)
 
   useEffect(() => {
     if (!origin || !destination) return
@@ -67,7 +68,14 @@ export function PlaceRecommendationSearch() {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [destination, origin])
+  }, [destination, origin, retryNonce])
+
+  function retryRecommendations() {
+    if (!origin || !destination || loading) return
+    setSearched(false)
+    setMessage('')
+    setRetryNonce((value) => value + 1)
+  }
 
   return (
     <section className="mt-7" aria-labelledby="place-recommendation-heading">
@@ -114,9 +122,17 @@ export function PlaceRecommendationSearch() {
           </p>
         ) : null}
         {message ? (
-          <p className="rounded-xl bg-warn-soft p-3 text-sm" role="alert">
-            {message}
-          </p>
+          <div className="rounded-xl bg-warn-soft p-3 text-sm" role="alert">
+            <p>{message}</p>
+            <button
+              type="button"
+              onClick={retryRecommendations}
+              disabled={!origin || !destination || loading}
+              className="mt-2 min-h-10 rounded-lg border border-border bg-background px-3 font-semibold disabled:opacity-50"
+            >
+              다시 시도
+            </button>
+          </div>
         ) : null}
       </Card>
 

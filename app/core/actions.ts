@@ -19,9 +19,13 @@ import {
   checkInParticipant,
   markParticipantNoShow,
   requestPoints,
+  resolveFareDispute,
+  setDesignatedFareSubmitter,
   settleTrip,
   startTrip,
   submitActualFare,
+  submitFareDispute,
+  withdrawFareDispute,
 } from '@/lib/core/service'
 
 export type CreateTripState = {
@@ -562,6 +566,117 @@ export async function confirmJourneyFareAction(formData: FormData) {
         idempotencyKey,
       ),
     '실제 요금에 동의했습니다.',
+  )
+}
+
+export async function setDesignatedFareSubmitterAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = requireJourneyUuid(text(formData, 'tripId'), '방')
+  const submitterText = text(formData, 'submitterId')
+  const submitterId = submitterText
+    ? requireJourneyUuid(submitterText, '실제 요금 입력자')
+    : null
+  const idempotencyKey = requireJourneyUuid(
+    text(formData, 'idempotencyKey'),
+    '요청',
+  )
+  await executeRoom(
+    tripId,
+    () =>
+      setDesignatedFareSubmitter({
+        actorId: user.userId,
+        tripId,
+        submitterId,
+        idempotencyKey,
+      }),
+    submitterId
+      ? '지정 참여자가 실제 요금을 입력할 수 있습니다.'
+      : '방장이 실제 요금을 입력하도록 지정했습니다.',
+  )
+}
+
+export async function submitJourneyFareDisputeAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = requireJourneyUuid(text(formData, 'tripId'), '방')
+  const idempotencyKey = requireJourneyUuid(
+    text(formData, 'idempotencyKey'),
+    '요청',
+  )
+  await executeJourney(
+    tripId,
+    'settle',
+    () =>
+      submitFareDispute({
+        actorId: user.userId,
+        tripId,
+        reason: text(formData, 'reason'),
+        idempotencyKey,
+      }),
+    '실제 요금 이의제기를 접수했습니다. 검토가 끝날 때까지 최종 정산이 보류됩니다.',
+  )
+}
+
+export async function withdrawJourneyFareDisputeAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = requireJourneyUuid(text(formData, 'tripId'), '방')
+  const idempotencyKey = requireJourneyUuid(
+    text(formData, 'idempotencyKey'),
+    '요청',
+  )
+  await executeJourney(
+    tripId,
+    'settle',
+    () =>
+      withdrawFareDispute({
+        actorId: user.userId,
+        tripId,
+        idempotencyKey,
+      }),
+    '이의제기를 철회했습니다. 실제 요금을 다시 확인할 수 있습니다.',
+  )
+}
+
+export async function resolveFareDisputeAction(formData: FormData) {
+  const admin = await requireAdmin()
+  const tripId = requireJourneyUuid(text(formData, 'tripId'), '방')
+  const disputeId = requireJourneyUuid(text(formData, 'disputeId'), '이의제기')
+  const idempotencyKey = requireJourneyUuid(
+    text(formData, 'idempotencyKey'),
+    '요청',
+  )
+  const outcome = text(formData, 'outcome')
+  if (outcome !== 'REJECTED' && outcome !== 'RESOLVED') {
+    finishAdminSettlement('처리 결과가 올바르지 않습니다.', true)
+  }
+  try {
+    await resolveFareDispute({
+      adminId: admin.userId,
+      tripId,
+      disputeId,
+      outcome,
+      resolutionNote: text(formData, 'resolutionNote'),
+      idempotencyKey,
+    })
+  } catch (error) {
+    finishAdminSettlement(
+      error instanceof CoreError
+        ? error.message
+        : '이의제기를 처리하지 못했습니다. 새로고침한 뒤 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishAdminSettlement(
+    outcome === 'RESOLVED'
+      ? '수정 요금 재제출을 요청했습니다. 원장과 잔액은 변경되지 않았습니다.'
+      : '이의제기를 기각했습니다. 실제 요금 확인과 정산을 다시 진행할 수 있습니다.',
+  )
+}
+
+function finishAdminSettlement(message: string, error = false): never {
+  revalidatePath('/admin')
+  revalidatePath('/admin/settlements')
+  redirect(
+    `/admin/settlements?${error ? 'error' : 'message'}=${encodeURIComponent(message)}`,
   )
 }
 

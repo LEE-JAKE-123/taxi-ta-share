@@ -50,6 +50,15 @@ const demoTripJourneyMigrationChecksum = createHash('sha256')
 const hostArrivalSettlementMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0013_host_arrival_equal_split.sql'))
   .digest('hex')
+const confirmedCohortSettlementMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0014_confirmed_cohort_settlement.sql'))
+  .digest('hex')
+const fareDisputeResolutionMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0015_fare_dispute_resolution.sql'))
+  .digest('hex')
+const designatedFareSubmitterMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0016_designated_fare_submitter.sql'))
+  .digest('hex')
 
 if (
   !databaseUrl ||
@@ -164,6 +173,27 @@ try {
           AND checksum = $12
           AND environment = $1
       ) AS host_arrival_settlement_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0014_confirmed_cohort_settlement'
+          AND checksum = $13
+          AND environment = $1
+      ) AS confirmed_cohort_settlement_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0015_fare_dispute_resolution'
+          AND checksum = $14
+          AND environment = $1
+      ) AS fare_dispute_resolution_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0016_designated_fare_submitter'
+          AND checksum = $15
+          AND environment = $1
+      ) AS designated_fare_submitter_migration_valid,
       (
         SELECT count(*) = 1
         FROM application_environment
@@ -451,8 +481,70 @@ try {
         WHERE p.user_id IS NULL
            OR d.amount IS DISTINCT FROM sp.deposit_amount
            OR s.final_share IS DISTINCT FROM sp.final_share
-           OR s.cohort_basis <> 'BOARDED'
+           OR s.cohort_basis NOT IN ('BOARDED', 'ESCROW_CONFIRMED')
       ) AS settlement_participant_snapshots_valid,
+      (
+        SELECT count(*) = 0
+        FROM trip_settlements s
+        WHERE s.cohort_basis = 'ESCROW_CONFIRMED'
+          AND s.status IN ('PENDING_CONFIRMATION', 'COMPLETED')
+          AND s.participant_count <> (
+            SELECT count(*)
+            FROM trip_settlement_participants sp
+            WHERE sp.trip_id = s.trip_id
+          )
+      ) AS confirmed_cohort_snapshot_count_valid,
+      EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'fare_disputes'::regclass
+          AND tgname = 'fare_disputes_validate_submission'
+          AND NOT tgisinternal
+      ) AS fare_dispute_submission_guard_exists,
+      EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'fare_confirmations'::regclass
+          AND tgname = 'fare_confirmations_validate_submission'
+          AND NOT tgisinternal
+      ) AS fare_confirmation_submission_guard_exists,
+      EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'fare_disputes'::regclass
+          AND tgname = 'fare_disputes_validate_resolution'
+          AND NOT tgisinternal
+      ) AS fare_dispute_resolution_guard_exists,
+      EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'trip_groups'::regclass
+          AND tgname = 'trip_groups_validate_designated_fare_submitter'
+          AND NOT tgisinternal
+      ) AS designated_fare_submitter_guard_exists,
+      (
+        SELECT count(*) = 0
+        FROM trip_groups g
+        LEFT JOIN trip_participants p
+          ON p.trip_id = g.trip_id
+         AND p.user_id = g.fare_submitter_user_id
+        WHERE g.fare_submitter_user_id IS NOT NULL
+          AND (
+            p.user_id IS NULL
+            OR p.role <> 'MEMBER'
+          )
+      ) AS designated_fare_submitter_valid,
+      (
+        SELECT count(*) = 0
+        FROM fare_disputes d
+        WHERE (d.status = 'OPEN') <> (
+          d.resolved_at IS NULL
+          AND d.resolution_note IS NULL
+          AND d.resolved_by_user_id IS NULL
+          AND d.resolution_idempotency_key IS NULL
+        )
+        OR (d.resolved_by_user_id IS NULL) <> (d.resolution_idempotency_key IS NULL)
+      ) AS fare_dispute_resolution_shape_valid,
       (
         SELECT count(*) = 0
         FROM (
@@ -487,6 +579,9 @@ try {
     sprint6PointEscrowMigrationChecksum,
     demoTripJourneyMigrationChecksum,
     hostArrivalSettlementMigrationChecksum,
+    confirmedCohortSettlementMigrationChecksum,
+    fareDisputeResolutionMigrationChecksum,
+    designatedFareSubmitterMigrationChecksum,
   ])
 
   const verification = result.rows[0]

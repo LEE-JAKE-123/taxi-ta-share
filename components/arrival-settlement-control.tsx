@@ -2,11 +2,17 @@
 
 import { useCallback, useState } from 'react'
 import { Calculator, Flag } from 'lucide-react'
-import { arriveAndSettleAction } from '@/app/core/actions'
+import { submitJourneyFareAction } from '@/app/core/actions'
 import { PendingSubmitButton } from '@/components/pending-submit-button'
 import { Modal } from '@/components/ui/modal'
 
-export function ArrivalSettlementControl({ tripId }: { tripId: string }) {
+export function ArrivalSettlementControl({
+  tripId,
+  isDesignated = false,
+}: {
+  tripId: string
+  isDesignated?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [idempotencyKey, setIdempotencyKey] = useState('')
   const close = useCallback(() => setOpen(false), [])
@@ -38,11 +44,13 @@ export function ArrivalSettlementControl({ tripId }: { tripId: string }) {
               실제 택시비 입력
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              실제 택시비를 탑승 인원으로 균등하게 나누어 정산합니다.
+              {isDesignated
+                ? '방장이 지정한 입력자로서 실제 택시비를 제출합니다. 참여자의 확인 또는 이의제기를 기다립니다.'
+                : '실제 택시비를 제출한 뒤 참여자의 확인 또는 이의제기를 기다립니다.'}
             </p>
           </div>
 
-          <form action={arriveAndSettleAction} className="flex flex-col gap-3">
+          <form action={submitJourneyFareAction} className="flex flex-col gap-3">
             <input type="hidden" name="tripId" value={tripId} />
             <input
               type="hidden"
@@ -78,14 +86,14 @@ export function ArrivalSettlementControl({ tripId }: { tripId: string }) {
               id="arrival-fare-help"
               className="text-xs text-muted-foreground"
             >
-              1원 이상 숫자만 입력해 주세요. 완료된 정산은 다시 실행되지 않습니다.
+              1원 이상 숫자만 입력해 주세요. 참여자 확인이 끝난 뒤에만 최종 정산됩니다.
             </p>
             <PendingSubmitButton
-              pendingLabel="정산 중..."
+              pendingLabel="제출 중..."
               disabled={!idempotencyKey}
             >
               <Calculator className="size-5" aria-hidden />
-              정산하기
+              실제 요금 제출
             </PendingSubmitButton>
             <button
               type="button"

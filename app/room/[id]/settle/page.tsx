@@ -5,6 +5,8 @@ import { Check, Info, UserX } from 'lucide-react'
 import {
   confirmJourneyFareAction,
   settleJourneyAction,
+  submitJourneyFareDisputeAction,
+  withdrawJourneyFareDisputeAction,
 } from '@/app/core/actions'
 import { BottomBar } from '@/components/bottom-bar'
 import { MobileShell } from '@/components/mobile-shell'
@@ -38,10 +40,23 @@ export default async function SettlePage({
   const canConfirm =
     trip.status === 'SETTLEMENT_PENDING' &&
     settlement?.status === 'PENDING_CONFIRMATION' &&
-    !settlement.currentUserConfirmed
+    !settlement.currentUserConfirmed &&
+    !settlement.currentUserHasOpenDispute
+  const canDispute =
+    trip.status === 'SETTLEMENT_PENDING' &&
+    settlement?.status === 'PENDING_CONFIRMATION' &&
+    !settlement.currentUserConfirmed &&
+    !settlement.currentUserHasOpenDispute &&
+    !isHost
   const allConfirmed =
     settlement &&
     settlement.confirmationCount === settlement.participantCount
+  const confirmationExpired = settlement?.confirmationExpired
+  const canSettle =
+    isHost &&
+    settlement?.status === 'PENDING_CONFIRMATION' &&
+    settlement.openDisputeCount === 0 &&
+    (allConfirmed || confirmationExpired)
 
   return (
     <MobileShell withTabBar={false}>
@@ -134,7 +149,47 @@ export default async function SettlePage({
             </PendingSubmitButton>
           </form>
         ) : null}
-        {isHost && settlement?.status === 'PENDING_CONFIRMATION' ? (
+        {canDispute ? (
+          <form action={submitJourneyFareDisputeAction} className="flex flex-col gap-2">
+            <input type="hidden" name="tripId" value={trip.tripId} />
+            <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+            <label htmlFor="fare-dispute-reason" className="text-sm font-semibold">
+              실제 요금 이의제기 사유
+            </label>
+            <textarea
+              id="fare-dispute-reason"
+              name="reason"
+              required
+              maxLength={1000}
+              className="app-input min-h-24 resize-y"
+            />
+            <PendingSubmitButton pendingLabel="이의제기 제출 중...">
+              이의제기 제출
+            </PendingSubmitButton>
+          </form>
+        ) : null}
+        {settlement?.openDisputeCount ? (
+          <div className="flex flex-col gap-2 rounded-xl bg-warn-soft px-4 py-3 text-sm" role="alert">
+            <p>실제 요금 이의제기가 접수되어 최종 정산이 보류되었습니다.</p>
+            {settlement.currentUserHasOpenDispute ? (
+              <form action={withdrawJourneyFareDisputeAction}>
+                <input type="hidden" name="tripId" value={trip.tripId} />
+                <input
+                  type="hidden"
+                  name="idempotencyKey"
+                  value={randomUUID()}
+                />
+                <PendingSubmitButton
+                  pendingLabel="철회 처리 중..."
+                  className="min-h-10 bg-background px-4 py-2 text-sm text-foreground"
+                >
+                  내 이의제기 철회
+                </PendingSubmitButton>
+              </form>
+            ) : null}
+          </div>
+        ) : null}
+        {canSettle ? (
           <form action={settleJourneyAction}>
             <input type="hidden" name="tripId" value={trip.tripId} />
             <input
@@ -144,11 +199,10 @@ export default async function SettlePage({
             />
             <PendingSubmitButton
               pendingLabel="정산 중..."
-              disabled={!allConfirmed}
             >
               {allConfirmed
                 ? '최종 정산 실행'
-                : `참여자 확인 대기 (${settlement.confirmationCount}/${settlement.participantCount})`}
+                : '확인 기한 만료 정산 실행'}
             </PendingSubmitButton>
           </form>
         ) : null}

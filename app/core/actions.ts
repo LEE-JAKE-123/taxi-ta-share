@@ -6,6 +6,7 @@ import { requireAdmin, requireCompleteUser } from '@/lib/auth/session'
 import { parseCreateTripForm } from '@/lib/core/trip-validation'
 import {
   arriveAndSettleTrip,
+  adjustFareDisputeByAdmin,
   CoreError,
   applyToTrip,
   approveParticipant,
@@ -15,6 +16,7 @@ import {
   confirmTripAndDeposit,
   createTrip,
   fulfillPointRequest,
+  forceSettleFareDisputeByAdmin,
   grantPoints,
   checkInParticipant,
   markParticipantNoShow,
@@ -645,18 +647,42 @@ export async function resolveFareDisputeAction(formData: FormData) {
     '요청',
   )
   const outcome = text(formData, 'outcome')
-  if (outcome !== 'REJECTED' && outcome !== 'RESOLVED') {
+  if (
+    outcome !== 'REJECTED' &&
+    outcome !== 'ADJUSTED' &&
+    outcome !== 'FORCE_SETTLE'
+  ) {
     finishAdminSettlement('처리 결과가 올바르지 않습니다.', true)
   }
   try {
-    await resolveFareDispute({
-      adminId: admin.userId,
-      tripId,
-      disputeId,
-      outcome,
-      resolutionNote: text(formData, 'resolutionNote'),
-      idempotencyKey,
-    })
+    const resolutionNote = text(formData, 'resolutionNote')
+    if (outcome === 'ADJUSTED') {
+      await adjustFareDisputeByAdmin({
+        adminId: admin.userId,
+        tripId,
+        disputeId,
+        actualFare: Number(text(formData, 'actualFare')),
+        resolutionNote,
+        idempotencyKey,
+      })
+    } else if (outcome === 'FORCE_SETTLE') {
+      await forceSettleFareDisputeByAdmin({
+        adminId: admin.userId,
+        tripId,
+        disputeId,
+        resolutionNote,
+        idempotencyKey,
+      })
+    } else {
+      await resolveFareDispute({
+        adminId: admin.userId,
+        tripId,
+        disputeId,
+        outcome,
+        resolutionNote,
+        idempotencyKey,
+      })
+    }
   } catch (error) {
     finishAdminSettlement(
       error instanceof CoreError
@@ -666,9 +692,11 @@ export async function resolveFareDisputeAction(formData: FormData) {
     )
   }
   finishAdminSettlement(
-    outcome === 'RESOLVED'
-      ? '수정 요금 재제출을 요청했습니다. 원장과 잔액은 변경되지 않았습니다.'
-      : '이의제기를 기각했습니다. 실제 요금 확인과 정산을 다시 진행할 수 있습니다.',
+    outcome === 'ADJUSTED'
+      ? '관리자가 실제 요금을 수정했습니다. 참여자 확인을 새로 시작합니다.'
+      : outcome === 'FORCE_SETTLE'
+        ? '관리자 강제 정산을 완료했습니다. 거래 내역을 확인할 수 있습니다.'
+        : '이의제기를 기각했습니다. 실제 요금 확인과 정산을 다시 진행할 수 있습니다.',
   )
 }
 

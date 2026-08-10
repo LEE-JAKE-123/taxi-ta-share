@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "node --env-file=.env.local scripts/run-e2e.mjs",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "db:verify": "node --env-file-if-exists=.env.local scripts/verify-db.mjs",
     "demo:admin": "node --env-file-if-exists=.env.local scripts/provision-demo-admin.mjs"
@@ -28,6 +29,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24",
     "@types/react": "^19",

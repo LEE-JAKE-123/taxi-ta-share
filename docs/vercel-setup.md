@@ -4,18 +4,18 @@
 
 ## 연결 정보
 
-- Vercel scope: `68wwkdj228-5537s-projects`
+- Vercel scope: `thsus1214-7527s-projects`
 - Vercel project: `taxi-ta-share`
+- GitHub Repository: `https://github.com/LEE-JAKE-123/taxi-ta-share` (연결됨)
 - Framework: Next.js
-- Database: Vercel Marketplace Neon `neon-celeste-bucket`
 - 로컬 연결 파일: `.vercel/project.json` 및 `.env.local`  
   두 파일은 비밀값 또는 개인 연결 정보를 포함할 수 있어 Git에 커밋하지 않는다.
 
-## 새 개발 환경 설정
+## 개발 환경 연동 실행
 
 ```powershell
 vercel login
-vercel link --yes --project taxi-ta-share --scope 68wwkdj228-5537s-projects
+vercel link --yes
 vercel env pull .env.local --environment=development --yes
 pnpm db:migrate
 pnpm db:verify

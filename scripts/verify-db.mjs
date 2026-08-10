@@ -59,6 +59,9 @@ const fareDisputeResolutionMigrationChecksum = createHash('sha256')
 const designatedFareSubmitterMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0016_designated_fare_submitter.sql'))
   .digest('hex')
+const adminDisputeCommandsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0017_admin_dispute_commands.sql'))
+  .digest('hex')
 
 if (
   !databaseUrl ||
@@ -194,6 +197,15 @@ try {
           AND checksum = $15
           AND environment = $1
       ) AS designated_fare_submitter_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0017_admin_dispute_commands'
+          AND checksum = $16
+          AND environment = $1
+      ) AS admin_dispute_commands_migration_valid,
+      to_regclass('public.admin_dispute_commands') IS NOT NULL
+        AS admin_dispute_commands_exists,
       (
         SELECT count(*) = 1
         FROM application_environment
@@ -582,6 +594,7 @@ try {
     confirmedCohortSettlementMigrationChecksum,
     fareDisputeResolutionMigrationChecksum,
     designatedFareSubmitterMigrationChecksum,
+    adminDisputeCommandsMigrationChecksum,
   ])
 
   const verification = result.rows[0]

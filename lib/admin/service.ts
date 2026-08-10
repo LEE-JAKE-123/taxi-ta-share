@@ -117,13 +117,27 @@ export async function getAdminFareDisputes(actorId: string) {
       u.student_id AS "participantStudentId",
       g.origin,
       g.destination,
+      g.departure_at AS "departureAt",
       s.actual_fare AS "actualFare",
       s.final_share AS "finalShare",
-      s.confirmation_deadline AS "confirmationDeadline"
+      s.participant_count AS "participantCount",
+      s.fare_revision AS "fareRevision",
+      s.confirmation_deadline AS "confirmationDeadline",
+      estimate.route_distance_m AS "routeDistanceM",
+      estimate.duration_seconds AS "durationSeconds",
+      estimate.provider_key AS "routeProvider",
+      estimate.calculated_at AS "routeCalculatedAt"
     FROM fare_disputes d
     JOIN users u ON u.user_id = d.user_id
     JOIN trip_groups g ON g.trip_id = d.trip_id
     JOIN trip_settlements s ON s.trip_id = d.trip_id
+    LEFT JOIN LATERAL (
+      SELECT route_distance_m, duration_seconds, provider_key, calculated_at
+      FROM fare_estimates
+      WHERE trip_id = d.trip_id
+      ORDER BY calculated_at DESC, created_at DESC
+      LIMIT 1
+    ) estimate ON true
     WHERE d.status = 'OPEN'
       AND g.status = 'SETTLEMENT_PENDING'
       AND s.status = 'PENDING_CONFIRMATION'
@@ -139,9 +153,16 @@ export async function getAdminFareDisputes(actorId: string) {
     participantStudentId: string
     origin: string
     destination: string
+    departureAt: string
     actualFare: number
     finalShare: number
+    participantCount: number
+    fareRevision: number
     confirmationDeadline: string
+    routeDistanceM: number | null
+    durationSeconds: number | null
+    routeProvider: string | null
+    routeCalculatedAt: string | null
   }>
 }
 

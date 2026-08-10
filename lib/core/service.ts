@@ -2066,7 +2066,7 @@ export async function submitFareDispute(input: {
 
   await inTransaction(async (client) => {
     const participant = await client.query(
-      `SELECT s.submitted_by, p.status
+      `SELECT s.submitted_by, s.fare_revision, p.status
        FROM trip_groups g
        JOIN trip_settlements s ON s.trip_id = g.trip_id
        JOIN trip_participants p
@@ -2117,9 +2117,15 @@ export async function submitFareDispute(input: {
 
     await client.query(
       `INSERT INTO fare_disputes (
-         trip_id, user_id, reason, idempotency_key
-       ) VALUES ($1, $2, $3, $4)`,
-      [input.tripId, input.actorId, reason, input.idempotencyKey],
+         trip_id, user_id, reason, idempotency_key, fare_revision
+       ) VALUES ($1, $2, $3, $4, $5)`,
+      [
+        input.tripId,
+        input.actorId,
+        reason,
+        input.idempotencyKey,
+        participantRow.fare_revision,
+      ],
     )
   })
 }
@@ -2291,6 +2297,152 @@ export async function resolveFareDispute(input: {
   })
 }
 
+export async function adjustFareDisputeByAdmin(input: {
+  adminId: string
+  tripId: string
+  disputeId: string
+  actualFare: number
+  resolutionNote: string
+  idempotencyKey: string
+}) {
+  positiveInteger(input.actualFare, '수정 실제 요금')
+  const note = input.resolutionNote.trim()
+  if (!note || note.length > 1000) {
+    throw new CoreError('검토 메모는 1~1,000자로 입력해 주세요.')
+  }
+  if (
+    !isPointRequestUuid(input.adminId) ||
+    !isPointRequestUuid(input.tripId) ||
+    !isPointRequestUuid(input.disputeId) ||
+    !isPointRequestUuid(input.idempotencyKey)
+  ) {
+    throw new CoreError('관리자 요금 수정 요청 식별자가 올바르지 않습니다.')
+  }
+
+  await inTransaction(async (client) => {
+    const admin = await client.query(
+      `SELECT 1 FROM users
+       WHERE user_id = $1 AND role = 'ADMIN' AND account_status = 'ACTIVE'
+       FOR UPDATE`,
+      [input.adminId],
+    )
+    if (!admin.rowCount) throw new CoreError('활성 관리자만 실제 요금을 수정할 수 있습니다.')
+
+    const settlement = await client.query(
+      `SELECT g.status AS trip_status, s.status AS settlement_status,
+              s.actual_fare, s.participant_count, s.final_share,
+              s.fare_revision, s.confirmation_deadline, s.submitted_by,
+              s.resubmission_required
+       FROM trip_groups g JOIN trip_settlements s ON s.trip_id = g.trip_id
+       WHERE g.trip_id = $1 FOR UPDATE OF g, s`,
+      [input.tripId],
+    )
+    const row = settlement.rows[0]
+    if (!row || row.trip_status !== 'SETTLEMENT_PENDING' ||
+      row.settlement_status !== 'PENDING_CONFIRMATION' || row.resubmission_required) {
+      throw new CoreError('현재 확인 대기 중인 실제 요금만 수정할 수 있습니다.')
+    }
+    const existingCommand = await client.query(
+      `SELECT command_id, trip_id, dispute_id, fare_revision,
+              previous_actual_fare, revised_actual_fare, reason
+       FROM admin_dispute_commands
+       WHERE admin_user_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    if (existingCommand.rowCount) {
+      const command = existingCommand.rows[0]
+      if (
+        command.trip_id === input.tripId && command.dispute_id === input.disputeId &&
+        Number(command.revised_actual_fare) === input.actualFare && command.reason === note &&
+        Number(row.actual_fare) === input.actualFare &&
+        Number(row.fare_revision) === Number(command.fare_revision) + 1
+      ) return
+      throw new CoreError('이미 다른 관리자 처리 요청에 사용한 식별자입니다.')
+    }
+    if (Number(row.actual_fare) === input.actualFare) {
+      throw new CoreError('수정 요금은 현재 제출된 실제 요금과 달라야 합니다.')
+    }
+
+    const dispute = await client.query(
+      `SELECT status, fare_revision FROM fare_disputes
+       WHERE dispute_id = $1 AND trip_id = $2 FOR UPDATE`,
+      [input.disputeId, input.tripId],
+    )
+    if (!dispute.rowCount || dispute.rows[0].status !== 'OPEN' ||
+      Number(dispute.rows[0].fare_revision) !== Number(row.fare_revision)) {
+      throw new CoreError('현재 요금 제안에 대해 열려 있는 이의만 수정할 수 있습니다.')
+    }
+    const otherOpenDisputes = await client.query(
+      `SELECT dispute_id FROM fare_disputes
+       WHERE trip_id = $1 AND status = 'OPEN' AND dispute_id <> $2 FOR UPDATE`,
+      [input.tripId, input.disputeId],
+    )
+    if (otherOpenDisputes.rowCount) {
+      throw new CoreError('요금을 수정하려면 같은 이동의 다른 열린 이의도 먼저 처리해 주세요.')
+    }
+    const snapshot = await client.query(
+      `SELECT user_id, deposit_amount AS amount
+       FROM trip_settlement_participants
+       WHERE trip_id = $1 ORDER BY user_id FOR UPDATE`,
+      [input.tripId],
+    )
+    if (snapshot.rowCount !== Number(row.participant_count)) {
+      throw new CoreError('정산 대상 인원 스냅샷이 현재 정산 정보와 일치하지 않습니다.')
+    }
+    const confirmations = await client.query(
+      `SELECT count(*)::int AS count FROM fare_confirmations WHERE trip_id = $1`,
+      [input.tripId],
+    )
+    const revisedShare = calculateDemoFinalShare(input.actualFare, Number(row.participant_count))
+
+    await client.query(
+      `UPDATE fare_disputes
+       SET status = 'RESOLVED', resolved_at = now(), resolution_note = $2,
+           resolved_by_user_id = $3, resolution_idempotency_key = $4
+       WHERE dispute_id = $1`,
+      [input.disputeId, note, input.adminId, input.idempotencyKey],
+    )
+    await client.query(
+      `INSERT INTO admin_dispute_commands (
+         trip_id, dispute_id, fare_revision, command_type,
+         previous_actual_fare, revised_actual_fare, participant_count,
+         final_share, confirmation_count, confirmation_deadline, reason,
+         admin_user_id, idempotency_key
+       ) VALUES ($1, $2, $3, 'ADJUST_FARE', $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        input.tripId, input.disputeId, row.fare_revision, row.actual_fare,
+        input.actualFare, row.participant_count, revisedShare,
+        confirmations.rows[0].count, row.confirmation_deadline, note,
+        input.adminId, input.idempotencyKey,
+      ],
+    )
+    await client.query(
+      `UPDATE trip_settlements SET resubmission_required = true WHERE trip_id = $1`,
+      [input.tripId],
+    )
+    await client.query(`UPDATE trip_groups SET status = 'IN_PROGRESS' WHERE trip_id = $1`, [input.tripId])
+    await client.query(`DELETE FROM fare_confirmations WHERE trip_id = $1`, [input.tripId])
+    await client.query(`DELETE FROM trip_settlement_participants WHERE trip_id = $1`, [input.tripId])
+    await client.query(
+      `UPDATE trip_settlements
+       SET actual_fare = $2, final_share = $3,
+           fare_submission_idempotency_key = $4, submitted_at = now(),
+           confirmation_deadline = now() + interval '24 hours',
+           resubmission_required = false, fare_revision = fare_revision + 1
+       WHERE trip_id = $1`,
+      [input.tripId, input.actualFare, revisedShare, input.idempotencyKey],
+    )
+    for (const participant of snapshot.rows) {
+      await client.query(
+        `INSERT INTO trip_settlement_participants (trip_id, user_id, deposit_amount, final_share)
+         VALUES ($1, $2, $3, $4)`,
+        [input.tripId, participant.user_id, participant.amount, revisedShare],
+      )
+    }
+    await client.query(`UPDATE trip_groups SET status = 'SETTLEMENT_PENDING' WHERE trip_id = $1`, [input.tripId])
+  })
+}
+
 export async function confirmFare(
   actorId: string,
   tripId: string,
@@ -2458,13 +2610,178 @@ export async function settleTrip(
     )
     await client.query(
       `UPDATE trip_settlements
-       SET status = 'COMPLETED', settlement_idempotency_key = $2, settled_at = now()
+       SET status = 'COMPLETED', settlement_idempotency_key = $2, settled_at = now(),
+           settled_by_user_id = $3, settlement_mode = 'HOST'
        WHERE trip_id = $1`,
-      [tripId, idempotencyKey],
+      [tripId, idempotencyKey, actorId],
     )
     await client.query(
       `UPDATE trip_groups SET status = 'COMPLETED' WHERE trip_id = $1`,
       [tripId],
     )
+  })
+}
+
+export async function forceSettleFareDisputeByAdmin(input: {
+  adminId: string
+  tripId: string
+  disputeId: string
+  resolutionNote: string
+  idempotencyKey: string
+}) {
+  const note = input.resolutionNote.trim()
+  if (!note || note.length > 1000) {
+    throw new CoreError('강제 정산 사유는 1~1,000자로 입력해 주세요.')
+  }
+  if (
+    !isPointRequestUuid(input.adminId) || !isPointRequestUuid(input.tripId) ||
+    !isPointRequestUuid(input.disputeId) || !isPointRequestUuid(input.idempotencyKey)
+  ) {
+    throw new CoreError('강제 정산 요청 식별자가 올바르지 않습니다.')
+  }
+  await inTransaction(async (client) => {
+    const admin = await client.query(
+      `SELECT 1 FROM users
+       WHERE user_id = $1 AND role = 'ADMIN' AND account_status = 'ACTIVE'
+       FOR UPDATE`,
+      [input.adminId],
+    )
+    if (!admin.rowCount) throw new CoreError('활성 관리자만 강제 정산할 수 있습니다.')
+    const trip = await client.query(
+      `SELECT g.status, s.actual_fare, s.final_share, s.participant_count,
+              s.status AS settlement_status, s.settlement_idempotency_key,
+              s.fare_revision, s.resubmission_required, s.settlement_mode,
+              s.admin_dispute_command_id
+       FROM trip_groups g JOIN trip_settlements s ON s.trip_id = g.trip_id
+       WHERE g.trip_id = $1 FOR UPDATE OF g, s`,
+      [input.tripId],
+    )
+    const row = trip.rows[0]
+    if (!row) throw new CoreError('정산 정보를 찾을 수 없습니다.')
+    const replay = await client.query(
+      `SELECT command_id, trip_id, dispute_id, reason, fare_revision
+       FROM admin_dispute_commands
+       WHERE admin_user_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      const command = replay.rows[0]
+      if (
+        command.trip_id === input.tripId && command.dispute_id === input.disputeId &&
+        command.reason === note && Number(command.fare_revision) === Number(row.fare_revision) &&
+        row.settlement_mode === 'ADMIN_FORCE' && row.admin_dispute_command_id === command.command_id
+      ) return
+      throw new CoreError('이미 다른 관리자 처리 요청에 사용한 식별자입니다.')
+    }
+    if (
+      row.status !== 'SETTLEMENT_PENDING' || row.settlement_status !== 'PENDING_CONFIRMATION' ||
+      row.resubmission_required
+    ) {
+      throw new CoreError('현재 확인 대기 중인 요금만 강제 정산할 수 있습니다.')
+    }
+    const disputes = await client.query(
+      `SELECT dispute_id, status, fare_revision FROM fare_disputes
+       WHERE trip_id = $1 AND status = 'OPEN' ORDER BY dispute_id FOR UPDATE`,
+      [input.tripId],
+    )
+    if (
+      disputes.rowCount !== 1 || disputes.rows[0].dispute_id !== input.disputeId ||
+      Number(disputes.rows[0].fare_revision) !== Number(row.fare_revision)
+    ) {
+      throw new CoreError('강제 정산은 현재 요금에 대한 마지막 열린 이의를 처리할 때만 가능합니다.')
+    }
+    const confirmations = await client.query(
+      `SELECT count(*)::int AS count FROM fare_confirmations WHERE trip_id = $1`,
+      [input.tripId],
+    )
+    const command = await client.query(
+      `INSERT INTO admin_dispute_commands (
+         trip_id, dispute_id, fare_revision, command_type, previous_actual_fare,
+         revised_actual_fare, participant_count, final_share, confirmation_count,
+         confirmation_deadline, reason, admin_user_id, idempotency_key
+       )
+       SELECT $1, $2, s.fare_revision, 'FORCE_SETTLE', s.actual_fare,
+              s.actual_fare, s.participant_count, s.final_share, $3,
+              s.confirmation_deadline, $4, $5, $6
+       FROM trip_settlements s WHERE s.trip_id = $1
+       RETURNING command_id`,
+      [input.tripId, input.disputeId, confirmations.rows[0].count, note, input.adminId, input.idempotencyKey],
+    )
+    const commandId = command.rows[0]?.command_id as string | undefined
+    if (!commandId) throw new CoreError('강제 정산 감사 기록을 만들지 못했습니다.')
+    await client.query(
+      `UPDATE fare_disputes
+       SET status = 'REJECTED', resolved_at = now(), resolution_note = $2,
+           resolved_by_user_id = $3, resolution_idempotency_key = $4
+       WHERE dispute_id = $1`,
+      [input.disputeId, note, input.adminId, input.idempotencyKey],
+    )
+    const deposits = await client.query(
+      `SELECT user_id, deposit_amount AS amount
+       FROM trip_settlement_participants WHERE trip_id = $1
+       ORDER BY user_id FOR UPDATE`,
+      [input.tripId],
+    )
+    if (deposits.rowCount !== Number(row.participant_count)) {
+      throw new CoreError('정산 대상 인원 스냅샷이 현재 정산 정보와 일치하지 않습니다.')
+    }
+    const userIds = deposits.rows.map((item) => item.user_id as string)
+    await client.query(
+      `SELECT user_id FROM users WHERE user_id = ANY($1::uuid[]) ORDER BY user_id FOR UPDATE`,
+      [userIds],
+    )
+    const balances = await client.query(
+      `SELECT user_id, available_points FROM point_accounts
+       WHERE user_id = ANY($1::uuid[]) ORDER BY user_id FOR UPDATE`,
+      [userIds],
+    )
+    const availableByUser = new Map(
+      balances.rows.map((balance) => [balance.user_id as string, Number(balance.available_points)]),
+    )
+    for (const deposit of deposits.rows) {
+      const additionalDebit = Math.max(0, Number(row.final_share) - Number(deposit.amount))
+      if ((availableByUser.get(deposit.user_id as string) ?? 0) < additionalDebit) {
+        throw new CoreError('추가 차감에 필요한 사용 가능 포인트가 부족합니다. 포인트 지급 후 다시 시도해 주세요.')
+      }
+    }
+    for (const deposit of deposits.rows) {
+      const depositAmount = Number(deposit.amount)
+      const finalShare = Number(row.final_share)
+      const chargedFromDeposit = Math.min(depositAmount, finalShare)
+      await client.query(
+        `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
+         VALUES ($1, 'SETTLEMENT_CHARGE', 0, $2, $3, $4, '관리자 강제 정산 예치금 차감', $5)`,
+        [deposit.user_id, -chargedFromDeposit, input.tripId, input.adminId, `trip:${input.tripId}:charge:${deposit.user_id}`],
+      )
+      if (depositAmount > finalShare) {
+        const refund = depositAmount - finalShare
+        await client.query(
+          `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
+           VALUES ($1, 'REFUND', $2, $3, $4, $5, '관리자 강제 정산 차액 반환', $6)`,
+          [deposit.user_id, refund, -refund, input.tripId, input.adminId, `trip:${input.tripId}:refund:${deposit.user_id}`],
+        )
+      } else if (depositAmount < finalShare) {
+        await client.query(
+          `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
+           VALUES ($1, 'ADDITIONAL_DEBIT', $2, 0, $3, $4, '관리자 강제 정산 추가 차감', $5)`,
+          [deposit.user_id, -(finalShare - depositAmount), input.tripId, input.adminId, `trip:${input.tripId}:debit:${deposit.user_id}`],
+        )
+      }
+    }
+    await client.query(
+      `UPDATE trip_participants SET status = 'COMPLETED', completed_at = now()
+       WHERE trip_id = $1 AND user_id = ANY($2::uuid[])
+         AND status IN ('DEPOSITED', 'CHECKED_IN', 'NO_SHOW')`,
+      [input.tripId, userIds],
+    )
+    await client.query(
+      `UPDATE trip_settlements
+       SET status = 'COMPLETED', settlement_idempotency_key = $2, settled_at = now(),
+           settled_by_user_id = $3, settlement_mode = 'ADMIN_FORCE',
+           admin_dispute_command_id = $4
+       WHERE trip_id = $1`,
+      [input.tripId, input.idempotencyKey, input.adminId, commandId],
+    )
+    await client.query(`UPDATE trip_groups SET status = 'COMPLETED' WHERE trip_id = $1`, [input.tripId])
   })
 }

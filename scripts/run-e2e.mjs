@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 
 const required = [
@@ -23,6 +24,9 @@ Object.assign(process.env, {
   DATABASE_EXPECTED_MIGRATION_ROLE: process.env.E2E_DATABASE_EXPECTED_MIGRATION_ROLE,
   APP_ENVIRONMENT: process.env.E2E_APP_ENVIRONMENT ?? 'development',
   SESSION_SECRET: process.env.E2E_SESSION_SECRET,
+  // Give the local Next server and browser tests the same ephemeral secret so
+  // the protected scheduler endpoint is exercised without storing a test secret.
+  CRON_SECRET: randomBytes(32).toString('base64url'),
 })
 
 for (const [command, args] of [

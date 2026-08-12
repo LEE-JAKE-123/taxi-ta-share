@@ -1,0 +1,32 @@
+name: Process due transitions
+
+on:
+  schedule:
+    # GitHub Actions schedules run in UTC. Avoid the top of the hour, when
+    # queued schedule events are most likely to be delayed.
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: due-transitions-production
+  cancel-in-progress: false
+
+jobs:
+  process-due-transitions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Invoke the protected transition processor
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DUE_TRANSITIONS_URL: ${{ secrets.DUE_TRANSITIONS_URL }}
+        run: |
+          test -n "$CRON_SECRET"
+          test -n "$DUE_TRANSITIONS_URL"
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-all-errors \
+            --connect-timeout 10 --max-time 55 \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$DUE_TRANSITIONS_URL"

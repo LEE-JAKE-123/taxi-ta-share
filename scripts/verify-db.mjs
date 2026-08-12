@@ -68,6 +68,11 @@ const systemDeadlineSettlementMigrationChecksum = createHash('sha256')
 const safetyReportsMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0019_safety_reports_blocks_support.sql'))
   .digest('hex')
+const designatedFareSubmissionGuardMigrationChecksum = createHash('sha256')
+  .update(
+    await readFile('db/migrations/0020_designated_fare_submission_guard.sql'),
+  )
+  .digest('hex')
 
 if (
   !databaseUrl ||
@@ -234,6 +239,13 @@ try {
           AND checksum = $18
           AND environment = $1
       ) AS safety_reports_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0020_designated_fare_submission_guard'
+          AND checksum = $19
+          AND environment = $1
+      ) AS designated_fare_submission_guard_migration_valid,
       to_regclass('public.user_blocks') IS NOT NULL AS user_blocks_exists,
       to_regclass('public.user_reports') IS NOT NULL AS user_reports_exists,
       to_regclass('public.report_review_actions') IS NOT NULL
@@ -643,7 +655,11 @@ try {
         WHERE tgrelid = 'trip_settlements'::regclass
           AND tgname = 'trip_settlements_validate_demo_cohort'
           AND NOT tgisinternal
-      ) AS demo_settlement_cohort_trigger_exists
+      ) AS demo_settlement_cohort_trigger_exists,
+      position(
+        'fare_submitter_user_id'
+        IN pg_get_functiondef('validate_demo_settlement_cohort()'::regprocedure)
+      ) > 0 AS designated_fare_submission_guard_exists
   `, [
     expectedEnvironment,
     expectedFingerprint,
@@ -663,6 +679,7 @@ try {
     adminDisputeCommandsMigrationChecksum,
     systemDeadlineSettlementMigrationChecksum,
     safetyReportsMigrationChecksum,
+    designatedFareSubmissionGuardMigrationChecksum,
   ])
 
   const verification = result.rows[0]

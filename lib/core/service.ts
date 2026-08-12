@@ -1886,8 +1886,8 @@ export async function submitActualFare(input: {
       )
       await client.query(
         `UPDATE trip_settlements
-         SET actual_fare = $2,
-             final_share = ceil($2::numeric / participant_count)::integer,
+         SET actual_fare = $2::integer,
+             final_share = ceil($2::integer::numeric / participant_count)::integer,
              fare_submission_idempotency_key = $3,
              submitted_at = now(),
              confirmation_deadline = now() + interval '24 hours',
@@ -1902,7 +1902,8 @@ export async function submitActualFare(input: {
            trip_id, actual_fare, participant_count, final_share, submitted_by,
            fare_submission_idempotency_key, confirmation_deadline, cohort_basis
          ) VALUES (
-           $1, $2, $3, ceil($2::numeric / $3)::integer,
+           $1, $2::integer, $3::smallint,
+           ceil($2::integer::numeric / $3::smallint::numeric)::integer,
            $4, $5, now() + interval '24 hours', 'ESCROW_CONFIRMED'
          )`,
         [input.tripId, input.actualFare, participantCount, input.actorId, input.idempotencyKey],

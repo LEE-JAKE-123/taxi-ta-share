@@ -62,6 +62,12 @@ const designatedFareSubmitterMigrationChecksum = createHash('sha256')
 const adminDisputeCommandsMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0017_admin_dispute_commands.sql'))
   .digest('hex')
+const systemDeadlineSettlementMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0018_system_deadline_settlement.sql'))
+  .digest('hex')
+const safetyReportsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0019_safety_reports_blocks_support.sql'))
+  .digest('hex')
 
 if (
   !databaseUrl ||
@@ -206,6 +212,66 @@ try {
       ) AS admin_dispute_commands_migration_valid,
       to_regclass('public.admin_dispute_commands') IS NOT NULL
         AS admin_dispute_commands_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0018_system_deadline_settlement'
+          AND checksum = $17
+          AND environment = $1
+      ) AS system_deadline_settlement_migration_valid,
+      to_regclass('public.system_deadline_commands') IS NOT NULL
+        AS system_deadline_commands_exists,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'trip_settlements'
+          AND indexname = 'trip_settlements_pending_deadline_idx'
+      ) AS due_settlement_index_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0019_safety_reports_blocks_support'
+          AND checksum = $18
+          AND environment = $1
+      ) AS safety_reports_migration_valid,
+      to_regclass('public.user_blocks') IS NOT NULL AS user_blocks_exists,
+      to_regclass('public.user_reports') IS NOT NULL AS user_reports_exists,
+      to_regclass('public.report_review_actions') IS NOT NULL
+        AS report_review_actions_exists,
+      to_regclass('public.support_tickets') IS NOT NULL AS support_tickets_exists,
+      to_regclass('public.support_ticket_actions') IS NOT NULL
+        AS support_ticket_actions_exists,
+      to_regclass('public.user_enforcement_actions') IS NOT NULL
+        AS user_enforcement_actions_exists,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public' AND tablename = 'user_blocks'
+          AND indexname = 'user_blocks_blocked_lookup_idx'
+      ) AS user_blocks_reverse_index_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'report_review_actions'::regclass
+          AND tgname = 'report_review_actions_prevent_mutation'
+          AND NOT tgisinternal
+      ) AS report_actions_append_only,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'support_ticket_actions'::regclass
+          AND tgname = 'support_ticket_actions_prevent_mutation'
+          AND NOT tgisinternal
+      ) AS support_actions_append_only,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'user_enforcement_actions'::regclass
+          AND tgname = 'user_enforcement_actions_prevent_mutation'
+          AND NOT tgisinternal
+      ) AS enforcement_actions_append_only,
+      (
+        SELECT count(*) = 0
+        FROM user_reports
+        WHERE (reported_user_id IS NULL) = (trip_id IS NULL)
+           OR reporter_user_id = reported_user_id
+      ) AS reports_target_shape_valid,
       (
         SELECT count(*) = 1
         FROM application_environment
@@ -595,6 +661,8 @@ try {
     fareDisputeResolutionMigrationChecksum,
     designatedFareSubmitterMigrationChecksum,
     adminDisputeCommandsMigrationChecksum,
+    systemDeadlineSettlementMigrationChecksum,
+    safetyReportsMigrationChecksum,
   ])
 
   const verification = result.rows[0]

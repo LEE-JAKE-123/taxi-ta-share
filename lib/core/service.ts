@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { randomUUID } from 'node:crypto'
 import { Pool, type PoolClient } from '@neondatabase/serverless'
 import { ensureDatabaseIdentity, getDatabase, getDatabaseUrl } from '@/lib/db/client'
 import { resolveTripClosureStatus } from '@/lib/core/trip-validation'
@@ -90,6 +91,23 @@ export async function getCoreDashboard(userId: string, isAdmin: boolean) {
         LEFT JOIN trip_participants p ON p.trip_id = g.trip_id
         LEFT JOIN trip_participants mine
           ON mine.trip_id = g.trip_id AND mine.user_id = ${userId}
+        WHERE mine.user_id IS NOT NULL
+           OR NOT EXISTS (
+             SELECT 1
+             FROM trip_participants safety_participant
+             JOIN user_blocks block ON (
+               (block.blocker_user_id = ${userId}
+                 AND block.blocked_user_id = safety_participant.user_id)
+               OR (block.blocker_user_id = safety_participant.user_id
+                 AND block.blocked_user_id = ${userId})
+             )
+             WHERE safety_participant.trip_id = g.trip_id
+               AND safety_participant.user_id <> ${userId}
+               AND safety_participant.status IN (
+                 'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+                 'NO_SHOW', 'DISPUTED', 'COMPLETED'
+               )
+           )
         GROUP BY g.trip_id, host.name, mine.status
         ORDER BY g.created_at DESC
       `,
@@ -311,6 +329,27 @@ export async function getTripJourney(userId: string, tripId: string) {
       reason: string
       createdAt: string
     }>,
+  }
+}
+
+export async function getMyPageBalanceSummary(userId: string) {
+  await ensureDatabaseIdentity()
+  const sql = getDatabase()
+  const balances = await sql`
+    SELECT
+      available_points AS "availablePoints",
+      held_points AS "heldPoints"
+    FROM point_accounts
+    WHERE user_id = ${userId}
+  `
+
+  const balance = balances[0] as
+    | { availablePoints: string; heldPoints: string }
+    | undefined
+
+  return {
+    availablePoints: Number(balance?.availablePoints ?? 0),
+    heldPoints: Number(balance?.heldPoints ?? 0),
   }
 }
 
@@ -748,6 +787,25 @@ export async function applyToTrip(
     if (!actor.rowCount) {
       throw new CoreError('가입 필수 정보를 완료한 사용자만 참여할 수 있습니다.')
     }
+    const blocked = await client.query(
+      `SELECT 1
+       FROM trip_participants existing
+       JOIN user_blocks b ON (
+         (b.blocker_user_id = $2 AND b.blocked_user_id = existing.user_id)
+         OR (b.blocker_user_id = existing.user_id AND b.blocked_user_id = $2)
+       )
+       WHERE existing.trip_id = $1
+         AND existing.user_id <> $2
+         AND existing.status IN (
+           'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+           'NO_SHOW', 'DISPUTED', 'COMPLETED'
+         )
+       LIMIT 1`,
+      [tripId, actorId],
+    )
+    if (blocked.rowCount) {
+      throw new CoreError('차단 관계가 있는 사용자와는 새 동승을 신청할 수 없습니다.')
+    }
     const inserted = await client.query(
       `INSERT INTO trip_participants
          (trip_id, user_id, role, status, application_idempotency_key)
@@ -803,6 +861,25 @@ export async function approveParticipant(input: {
     )
     if (!participantUser.rowCount) {
       throw new CoreError('가입 정보가 완료된 활성 사용자만 승인할 수 있습니다.')
+    }
+    const blocked = await client.query(
+      `SELECT 1
+       FROM trip_participants existing
+       JOIN user_blocks b ON (
+         (b.blocker_user_id = $2 AND b.blocked_user_id = existing.user_id)
+         OR (b.blocker_user_id = existing.user_id AND b.blocked_user_id = $2)
+       )
+       WHERE existing.trip_id = $1
+         AND existing.user_id <> $2
+         AND existing.status IN (
+           'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+           'NO_SHOW', 'DISPUTED', 'COMPLETED'
+         )
+       LIMIT 1`,
+      [input.tripId, input.participantId],
+    )
+    if (blocked.rowCount) {
+      throw new CoreError('차단 관계가 있는 사용자는 참여 승인할 수 없습니다.')
     }
     const count = await client.query(
       `SELECT count(*)::int AS count FROM trip_participants
@@ -900,22 +977,22 @@ export async function cancelTrip(
     if (!row.departure_open) {
       throw new CoreError('출발 시각이 지난 모집은 취소할 수 없습니다.')
     }
-    const confirmedMembers = await client.query(
-      `SELECT count(*)::int AS count
-       FROM trip_participants
-       WHERE trip_id = $1
-         AND role = 'MEMBER'
-         AND status IN (
-           'APPROVED', 'DEPOSITED', 'CHECKED_IN',
-           'NO_SHOW', 'DISPUTED', 'COMPLETED'
-         )`,
+    const deposits = await client.query(
+      `SELECT 1 FROM trip_deposits WHERE trip_id = $1 LIMIT 1 FOR SHARE`,
       [tripId],
     )
-    if (Number(confirmedMembers.rows[0].count) > 0) {
+    if (deposits.rowCount) {
       throw new CoreError(
-        '확정 참여자가 있는 모집은 취소 정책이 결정될 때까지 취소할 수 없습니다.',
+        '예치가 완료된 모집은 취소할 수 없습니다. 확정 인원은 최종 정산까지 유지됩니다.',
       )
     }
+    await client.query(
+      `UPDATE trip_participants
+       SET status = 'CANCELLED', cancelled_at = now(),
+           cancellation_idempotency_key = $2
+       WHERE trip_id = $1 AND status IN ('APPLIED', 'APPROVED')`,
+      [tripId, idempotencyKey],
+    )
     await client.query(
       `UPDATE trip_groups
        SET status = 'CANCELLED',
@@ -926,6 +1003,58 @@ export async function cancelTrip(
        WHERE trip_id = $1 AND host_user_id = $2`,
       [tripId, actorId, idempotencyKey],
     )
+  })
+}
+
+export async function cancelParticipation(
+  actorId: string,
+  tripId: string,
+  idempotencyKey: string,
+) {
+  await inTransaction(async (client) => {
+    const participant = await client.query(
+      `SELECT g.status AS trip_status, g.departure_at > now() AS departure_open,
+              p.role, p.status, p.cancellation_idempotency_key,
+              EXISTS (
+                SELECT 1 FROM trip_deposits d
+                WHERE d.trip_id = p.trip_id AND d.user_id = p.user_id
+              ) AS has_deposit
+       FROM trip_groups g
+       JOIN trip_participants p ON p.trip_id = g.trip_id
+       WHERE g.trip_id = $1 AND p.user_id = $2
+       FOR UPDATE OF g, p`,
+      [tripId, actorId],
+    )
+    const row = participant.rows[0]
+    if (!row || row.role !== 'MEMBER') {
+      throw new CoreError('참여 중인 사용자만 참여를 취소할 수 있습니다.')
+    }
+    if (
+      row.status === 'CANCELLED' &&
+      row.cancellation_idempotency_key === idempotencyKey
+    ) {
+      return
+    }
+    if (row.trip_status !== 'OPEN' || !row.departure_open) {
+      throw new CoreError('모집 중이며 출발 전인 방에서만 참여를 취소할 수 있습니다.')
+    }
+    if (!['APPLIED', 'APPROVED'].includes(row.status) || row.has_deposit) {
+      throw new CoreError(
+        '예치 전 신청 또는 승인 상태만 취소할 수 있습니다. 예치 후 취소는 취소 정책 결정이 필요합니다.',
+      )
+    }
+    const cancelled = await client.query(
+      `UPDATE trip_participants
+       SET status = 'CANCELLED', cancelled_at = now(),
+           cancellation_idempotency_key = $3
+       WHERE trip_id = $1 AND user_id = $2
+         AND status IN ('APPLIED', 'APPROVED')
+       RETURNING user_id`,
+      [tripId, actorId, idempotencyKey],
+    )
+    if (!cancelled.rowCount) {
+      throw new CoreError('참여 취소 대상을 다시 확인해 주세요.')
+    }
   })
 }
 
@@ -2620,6 +2749,208 @@ export async function settleTrip(
       [tripId],
     )
   })
+}
+
+type DeadlineSettlementResult = 'SETTLED' | 'SKIPPED'
+
+async function settleTripAtDeadline(
+  tripId: string,
+): Promise<DeadlineSettlementResult> {
+  return inTransaction(async (client) => {
+    const trip = await client.query(
+      `SELECT g.status, s.actual_fare, s.final_share, s.participant_count,
+              s.status AS settlement_status, s.fare_revision,
+              s.resubmission_required, s.confirmation_deadline,
+              s.confirmation_deadline <= now() AS deadline_due
+       FROM trip_groups g
+       JOIN trip_settlements s ON s.trip_id = g.trip_id
+       WHERE g.trip_id = $1
+       FOR UPDATE OF g, s`,
+      [tripId],
+    )
+    const row = trip.rows[0]
+    if (
+      !row ||
+      row.status !== 'SETTLEMENT_PENDING' ||
+      row.settlement_status !== 'PENDING_CONFIRMATION' ||
+      row.resubmission_required ||
+      !row.deadline_due
+    ) {
+      return 'SKIPPED'
+    }
+
+    const disputes = await client.query(
+      `SELECT 1 FROM fare_disputes
+       WHERE trip_id = $1 AND status = 'OPEN'
+       LIMIT 1
+       FOR UPDATE`,
+      [tripId],
+    )
+    if (disputes.rowCount) return 'SKIPPED'
+
+    const deposits = await client.query(
+      `SELECT user_id, deposit_amount AS amount
+       FROM trip_settlement_participants
+       WHERE trip_id = $1
+       ORDER BY user_id
+       FOR UPDATE`,
+      [tripId],
+    )
+    if (deposits.rowCount !== Number(row.participant_count)) return 'SKIPPED'
+
+    const userIds = deposits.rows.map((item) => item.user_id as string)
+    const participants = await client.query(
+      `SELECT user_id, status
+       FROM trip_participants
+       WHERE trip_id = $1 AND user_id = ANY($2::uuid[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      [tripId, userIds],
+    )
+    if (
+      participants.rowCount !== Number(row.participant_count) ||
+      participants.rows.some(
+        (participant) =>
+          !['DEPOSITED', 'CHECKED_IN', 'NO_SHOW'].includes(participant.status),
+      )
+    ) {
+      return 'SKIPPED'
+    }
+
+    const balances = await client.query(
+      `SELECT user_id, available_points, held_points
+       FROM point_accounts
+       WHERE user_id = ANY($1::uuid[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      [userIds],
+    )
+    if (balances.rowCount !== Number(row.participant_count)) return 'SKIPPED'
+    const balanceByUser = new Map(
+      balances.rows.map((balance) => [
+        balance.user_id as string,
+        {
+          available: Number(balance.available_points),
+          held: Number(balance.held_points),
+        },
+      ]),
+    )
+    for (const deposit of deposits.rows) {
+      const amount = Number(deposit.amount)
+      const balance = balanceByUser.get(deposit.user_id as string)
+      const additionalDebit = Math.max(0, Number(row.final_share) - amount)
+      if (!balance || balance.held < amount || balance.available < additionalDebit) {
+        return 'SKIPPED'
+      }
+    }
+
+    const executionKey = `deadline:${tripId}:revision:${row.fare_revision}`
+    const command = await client.query(
+      `INSERT INTO system_deadline_commands (
+         trip_id, fare_revision, command_type, execution_key
+       ) VALUES ($1, $2, 'SETTLE_DEADLINE', $3)
+       ON CONFLICT (trip_id, fare_revision, command_type) DO NOTHING
+       RETURNING command_id`,
+      [tripId, row.fare_revision, executionKey],
+    )
+    const commandId = command.rows[0]?.command_id as string | undefined
+    if (!commandId) return 'SKIPPED'
+
+    for (const deposit of deposits.rows) {
+      const userId = deposit.user_id as string
+      const depositAmount = Number(deposit.amount)
+      const finalShare = Number(row.final_share)
+      const chargedFromDeposit = Math.min(depositAmount, finalShare)
+      await client.query(
+        `INSERT INTO point_ledger (
+           user_id, entry_type, available_delta, held_delta, trip_id,
+           actor_user_id, system_deadline_command_id, reason, idempotency_key
+         ) VALUES ($1, 'SETTLEMENT_CHARGE', 0, $2, $3, NULL, $4, 'system deadline settlement charge', $5)`,
+        [
+          userId,
+          -chargedFromDeposit,
+          tripId,
+          commandId,
+          `system-deadline:${tripId}:revision:${row.fare_revision}:charge:${userId}`,
+        ],
+      )
+      if (depositAmount > finalShare) {
+        const refund = depositAmount - finalShare
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, system_deadline_command_id, reason, idempotency_key
+           ) VALUES ($1, 'REFUND', $2, $3, $4, NULL, $5, 'system deadline settlement refund', $6)`,
+          [
+            userId,
+            refund,
+            -refund,
+            tripId,
+            commandId,
+            `system-deadline:${tripId}:revision:${row.fare_revision}:refund:${userId}`,
+          ],
+        )
+      } else if (depositAmount < finalShare) {
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, system_deadline_command_id, reason, idempotency_key
+           ) VALUES ($1, 'ADDITIONAL_DEBIT', $2, 0, $3, NULL, $4, 'system deadline settlement additional debit', $5)`,
+          [
+            userId,
+            -(finalShare - depositAmount),
+            tripId,
+            commandId,
+            `system-deadline:${tripId}:revision:${row.fare_revision}:debit:${userId}`,
+          ],
+        )
+      }
+    }
+
+    await client.query(
+      `UPDATE trip_participants SET status = 'COMPLETED', completed_at = now()
+       WHERE trip_id = $1 AND user_id = ANY($2::uuid[])
+         AND status IN ('DEPOSITED', 'CHECKED_IN', 'NO_SHOW')`,
+      [tripId, userIds],
+    )
+    await client.query(
+      `UPDATE trip_settlements
+       SET status = 'COMPLETED', settlement_idempotency_key = $2, settled_at = now(),
+           settled_by_user_id = NULL, settlement_mode = 'SYSTEM_DEADLINE',
+           system_deadline_command_id = $3
+       WHERE trip_id = $1`,
+      [tripId, randomUUID(), commandId],
+    )
+    await client.query(
+      `UPDATE trip_groups SET status = 'COMPLETED' WHERE trip_id = $1`,
+      [tripId],
+    )
+    return 'SETTLED'
+  })
+}
+
+export async function processDueTransitions() {
+  await ensureDatabaseIdentity()
+  const closed = await closeDueTrips()
+  const sql = getDatabase()
+  const dueSettlements = await sql`
+    SELECT s.trip_id AS "tripId"
+    FROM trip_settlements s
+    JOIN trip_groups g ON g.trip_id = s.trip_id
+    WHERE g.status = 'SETTLEMENT_PENDING'
+      AND s.status = 'PENDING_CONFIRMATION'
+      AND s.resubmission_required = false
+      AND s.confirmation_deadline <= now()
+    ORDER BY s.confirmation_deadline, s.trip_id
+    LIMIT 100
+  `
+  let settled = 0
+  let skipped = 0
+  for (const due of dueSettlements as { tripId: string }[]) {
+    if ((await settleTripAtDeadline(due.tripId)) === 'SETTLED') settled += 1
+    else skipped += 1
+  }
+  return { closed, scannedSettlements: dueSettlements.length, settled, skipped }
 }
 
 export async function forceSettleFareDisputeByAdmin(input: {

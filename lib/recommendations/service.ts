@@ -238,6 +238,22 @@ export async function getTripRecommendations(
         WHERE mine.trip_id = g.trip_id
           AND mine.user_id = ${userId}
       )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM trip_participants participant
+        JOIN user_blocks block ON (
+          (block.blocker_user_id = ${userId}
+            AND block.blocked_user_id = participant.user_id)
+          OR (block.blocker_user_id = participant.user_id
+            AND block.blocked_user_id = ${userId})
+        )
+        WHERE participant.trip_id = g.trip_id
+          AND participant.user_id <> ${userId}
+          AND participant.status IN (
+            'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+            'NO_SHOW', 'DISPUTED', 'COMPLETED'
+          )
+      )
     ORDER BY g.departure_at, g.trip_id
     LIMIT 50
   `

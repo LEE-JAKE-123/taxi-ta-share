@@ -1,0 +1,231 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { Pool } from '@neondatabase/serverless'
+
+type JourneyFixture = {
+  tripId: string
+  hostId: string
+  memberId: string
+  noShowId: string
+  hostToken: string
+  memberToken: string
+}
+
+function database() {
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) throw new Error('DATABASE_URL is required for E2E tests.')
+  return new Pool({ connectionString, max: 1 })
+}
+
+async function seedConfirmedJourney(): Promise<JourneyFixture> {
+  const pool = database()
+  const client = await pool.connect()
+  const runId = `e2e-journey-${randomUUID()}`
+  const adminId = randomUUID()
+  const hostId = randomUUID()
+  const memberId = randomUUID()
+  const noShowId = randomUUID()
+  const tripId = randomUUID()
+  const hostToken = randomBytes(32).toString('base64url')
+  const memberToken = randomBytes(32).toString('base64url')
+  const participantIds = [hostId, memberId, noShowId]
+
+  try {
+    await client.query('BEGIN')
+    const people = [
+      [adminId, 'ADMIN', 'E2E Admin'],
+      [hostId, 'USER', 'E2E Host'],
+      [memberId, 'USER', 'E2E Member'],
+      [noShowId, 'USER', 'E2E No Show'],
+    ] as const
+    for (let index = 0; index < people.length; index += 1) {
+      const [userId, role, name] = people[index]
+      await client.query(
+        `INSERT INTO users (user_id, signup_attempt_id, student_id, name, gender, school_email, role, account_status)
+         VALUES ($1, $2, $3, $4, 'female', $5, $6, 'ACTIVE')`,
+        [
+          userId,
+          randomUUID(),
+          `8${Date.now().toString().slice(-7)}${index}`,
+          `${runId}-${name}`,
+          `${runId}-${index}@jbnu.ac.kr`,
+          role,
+        ],
+      )
+    }
+    for (const [userId, token] of [[hostId, hostToken], [memberId, memberToken]] as const) {
+      await client.query(
+        `INSERT INTO auth_sessions (user_id, token_hash, expires_at)
+         VALUES ($1, $2, now() + interval '1 hour')`,
+        [userId, createHash('sha256').update(token).digest('hex')],
+      )
+    }
+    for (const userId of participantIds) {
+      await client.query(
+        `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
+         VALUES ($1, 'ADMIN_GRANT', 7500, 0, NULL, $2, 'E2E journey grant', $3)`,
+        [userId, adminId, `${runId}:grant:${userId}`],
+      )
+    }
+    await client.query(
+      `INSERT INTO trip_groups (
+         trip_id, host_user_id, origin, destination, departure_at, max_participants,
+         estimated_fare, status, creation_idempotency_key, closed_at, closure_type
+       ) VALUES ($1, $2, 'E2E Origin', 'E2E Destination', now() + interval '1 hour', 3,
+         15000, 'OPEN', $3, NULL, NULL)`,
+      [tripId, hostId, randomUUID()],
+    )
+    for (const [userId, role] of [[hostId, 'HOST'], [memberId, 'MEMBER'], [noShowId, 'MEMBER']] as const) {
+      await client.query(
+        `INSERT INTO trip_participants (trip_id, user_id, role, status, approval_idempotency_key)
+         VALUES ($1, $2, $3, 'APPROVED', $4)`,
+        [tripId, userId, role, randomUUID()],
+      )
+    }
+    await client.query(
+      `UPDATE trip_groups SET status = 'CLOSED', closed_at = now(), closure_type = 'HOST' WHERE trip_id = $1`,
+      [tripId],
+    )
+    for (const userId of participantIds) {
+      await client.query(
+        `INSERT INTO trip_deposits (trip_id, user_id, amount) VALUES ($1, $2, 5000)`,
+        [tripId, userId],
+      )
+      await client.query(
+        `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
+         VALUES ($1, 'DEPOSIT', -5000, 5000, $2, $3, 'E2E journey deposit', $4)`,
+        [userId, tripId, hostId, `${runId}:deposit:${userId}`],
+      )
+      await client.query(
+        `UPDATE trip_participants SET status = 'DEPOSITED' WHERE trip_id = $1 AND user_id = $2`,
+        [tripId, userId],
+      )
+    }
+    const location = await client.query(
+      `SELECT location_revision FROM trip_groups WHERE trip_id = $1`,
+      [tripId],
+    )
+    const fareEstimateId = randomUUID()
+    await client.query(
+      `INSERT INTO fare_estimates (
+         fare_estimate_id, trip_id, trip_location_revision, route_calculation_id,
+         fare_calculation_id, provider_key, route_distance_m, duration_seconds,
+         estimated_fare_won, deposit_points_total, fare_source, pricing_policy_key,
+         pricing_policy_version, calculated_at, expires_at, request_trace_id,
+         request_fingerprint, calculation_basis, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, 'E2E', 10000, 1200, 15000, 15000,
+         'E2E fixture', 'E2E', '1', now(), now() + interval '1 day', $6, $7,
+         '{"fixture":true}'::jsonb, $8)`,
+      [
+        fareEstimateId,
+        tripId,
+        location.rows[0].location_revision,
+        `${runId}:route`,
+        `${runId}:fare`,
+        `${runId}:trace`,
+        `${runId}:fingerprint`,
+        randomUUID(),
+      ],
+    )
+    await client.query(
+      `UPDATE trip_groups SET current_fare_estimate_id = $2, status = 'CONFIRMED' WHERE trip_id = $1`,
+      [tripId, fareEstimateId],
+    )
+    await client.query('COMMIT')
+    return { tripId, hostId, memberId, noShowId, hostToken, memberToken }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+    await pool.end()
+  }
+}
+
+async function pageForUser(browser: Browser, token: string): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext()
+  await context.addCookies([{
+    name: 'taxitashare_session',
+    value: token,
+    domain: '127.0.0.1',
+    path: '/',
+    httpOnly: true,
+    sameSite: 'Lax',
+    expires: Math.floor(Date.now() / 1000) + 3600,
+  }])
+  return { context, page: await context.newPage() }
+}
+
+async function queryRows<T>(sql: string, values: unknown[]) {
+  const pool = database()
+  const client = await pool.connect()
+  try {
+    const result = await client.query(sql, values)
+    return result.rows as T[]
+  } finally {
+    client.release()
+    await pool.end()
+  }
+}
+
+test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상태를 보존한다', async ({ browser }) => {
+  test.setTimeout(120_000)
+  const fixture = await seedConfirmedJourney()
+  const host = await pageForUser(browser, fixture.hostToken)
+  const member = await pageForUser(browser, fixture.memberToken)
+
+  try {
+    await host.page.goto(`/room/${fixture.tripId}`)
+    const startForm = host.page.locator(`form:has(input[name="tripId"][value="${fixture.tripId}"]):has(button:has-text("출발"))`)
+    await startForm.getByRole('button').click()
+    await expect(startForm).toHaveCount(0, { timeout: 30_000 })
+
+    await member.page.goto(`/room/${fixture.tripId}/gathering`)
+    const memberCheckInForm = member.page.locator('form:has(input[name="tripId"]):not(:has(input[name="participantId"]))')
+    await memberCheckInForm.getByRole('button').click()
+    await expect(memberCheckInForm).toHaveCount(0, { timeout: 30_000 })
+
+    await host.page.goto(`/room/${fixture.tripId}/gathering`)
+    const checkInForm = host.page.locator('form:has(input[name="tripId"]):not(:has(input[name="participantId"]))')
+    await checkInForm.getByRole('button').click()
+    await expect(checkInForm).toHaveCount(0, { timeout: 30_000 })
+    const noShowForm = host.page.locator('form').filter({ has: host.page.locator(`input[name="participantId"][value="${fixture.noShowId}"]`) })
+    await noShowForm.getByRole('button').click()
+    await expect(noShowForm).toHaveCount(0, { timeout: 30_000 })
+
+    const [trip] = await queryRows<{ status: string }>(
+      `SELECT status FROM trip_groups WHERE trip_id = $1`,
+      [fixture.tripId],
+    )
+    expect(trip).toMatchObject({ status: 'IN_PROGRESS' })
+    const participants = await queryRows<{ user_id: string; status: string }>(
+      `SELECT user_id, status FROM trip_participants WHERE trip_id = $1 ORDER BY user_id`,
+      [fixture.tripId],
+    )
+    expect(participants).toHaveLength(3)
+    expect(participants).toEqual(expect.arrayContaining([
+      { user_id: fixture.hostId, status: 'CHECKED_IN' },
+      { user_id: fixture.memberId, status: 'CHECKED_IN' },
+      { user_id: fixture.noShowId, status: 'NO_SHOW' },
+    ]))
+    expect(await queryRows(
+      `SELECT trip_id FROM trip_deposits WHERE trip_id = $1`,
+      [fixture.tripId],
+    )).toHaveLength(3)
+    expect(await queryRows(
+      `SELECT ledger_id FROM point_ledger WHERE trip_id = $1 AND entry_type = 'DEPOSIT'`,
+      [fixture.tripId],
+    )).toHaveLength(3)
+    expect(await queryRows(
+      `SELECT trip_id FROM trip_settlements WHERE trip_id = $1`,
+      [fixture.tripId],
+    )).toHaveLength(0)
+    expect(await queryRows(
+      `SELECT user_id, available_points, held_points FROM point_accounts WHERE user_id = ANY($1::uuid[]) AND (available_points <> 2500 OR held_points <> 5000)`,
+      [[fixture.hostId, fixture.memberId, fixture.noShowId]],
+    )).toHaveLength(0)
+  } finally {
+    await host.context.close()
+    await member.context.close()
+  }
+})

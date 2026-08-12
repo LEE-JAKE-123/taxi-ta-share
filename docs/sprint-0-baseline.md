@@ -53,7 +53,7 @@ Mock 데이터는 화면 표현에만 사용할 수 있다. 권한, 모집·참�
 | DEPOSITED | 미도착 판정 | NO_SHOW | 증빙·판정 주체 정책 필요 |
 | DEPOSITED/NO_SHOW | 요금 이의 | DISPUTED | 확인 기한과 운영자 판정 필요 |
 | DEPOSITED/CHECKED_IN/NO_SHOW | 정산 완료 | COMPLETED | 확정 인원 기준 정산 |
-| APPLIED/APPROVED | 참여 취소 | CANCELLED | 예치 이후 반환 정책은 미결 |
+| APPLIED/APPROVED | 참여 취소 | CANCELLED | `OPEN`·출발 전·예치 전만 가능. 모집 종료 또는 예치 후에는 취소 불가이며 확정 인원은 정산 대상으로 유지 |
 
 모집 상태와 참여자 상태는 같은 서버 트랜잭션 경계에서 함께 검증한다.
 

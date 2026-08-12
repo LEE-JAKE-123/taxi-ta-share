@@ -3,6 +3,10 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  // E2E fixtures append immutable ledger rows to one isolated database branch.
+  // Keep files serial so independent scenarios cannot contend for its connection.
+  workers: 1,
+  timeout: 90_000,
   retries: process.env.CI ? 1 : 0,
   reporter: 'list',
   use: {

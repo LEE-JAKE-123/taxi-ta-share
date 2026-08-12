@@ -200,7 +200,7 @@ test('관리자가 이의를 기각하면 요금·원장·정산 제안은 유�
   await form.locator('select[name="outcome"]').selectOption('REJECTED')
   await form.locator('textarea[name="resolutionNote"]').fill('영수증과 운행 정보를 검토했습니다.')
   await form.getByRole('button').click()
-  await expect(form).toHaveCount(0)
+  await expect(form).toHaveCount(0, { timeout: 60_000 })
   const [dispute] = await queryOne<{ status: string; resolved_by_user_id: string }>(
     `SELECT status, resolved_by_user_id FROM fare_disputes WHERE dispute_id = $1`, [fixture.disputeId],
   )
@@ -220,7 +220,7 @@ test('관리자 요금 수정은 새 확인 차수를 만들고 원장을 쓰지
   await form.locator('input[name="actualFare"]').fill('12001')
   await form.locator('textarea[name="resolutionNote"]').fill('영수증 금액으로 수정합니다.')
   await form.getByRole('button').click()
-  await expect(form).toHaveCount(0)
+  await expect(form).toHaveCount(0, { timeout: 60_000 })
   const [settlement] = await queryOne<{ actual_fare: number; final_share: number; fare_revision: number; status: string; resubmission_required: boolean }>(
     `SELECT actual_fare, final_share, fare_revision, status, resubmission_required FROM trip_settlements WHERE trip_id = $1`, [fixture.tripId],
   )
@@ -237,7 +237,7 @@ test('관리자 강제 정산은 노쇼를 포함한 cohort를 한 번만 완료
   await form.locator('select[name="outcome"]').selectOption('FORCE_SETTLE')
   await form.locator('textarea[name="resolutionNote"]').fill('마지막 이의를 검토해 현재 금액으로 정산합니다.')
   await form.getByRole('button').click()
-  await expect(form).toHaveCount(0)
+  await expect(form).toHaveCount(0, { timeout: 60_000 })
   const [settlement] = await queryOne<{ status: string; settlement_mode: string; settled_by_user_id: string }>(
     `SELECT status, settlement_mode, settled_by_user_id FROM trip_settlements WHERE trip_id = $1`, [fixture.tripId],
   )

@@ -1,35 +1,34 @@
-'use client'
-
-import { useRouter } from 'next/navigation'
-import { useApp } from '@/components/app-provider'
-import { MobileShell } from '@/components/mobile-shell'
-import { TopBar } from '@/components/top-bar'
-import { TabBar } from '@/components/tab-bar'
-import { Card } from '@/components/ui/card'
-import { formatPoints } from '@/lib/mock-data'
+import Link from 'next/link'
 import {
   ChevronRight,
-  Wallet,
-  ShieldCheck,
-  Bell,
-  FileText,
-  LogOut,
   GraduationCap,
+  LogOut,
+  MessageCircleQuestion,
+  ShieldCheck,
+  Wallet,
 } from 'lucide-react'
+import { MobileShell } from '@/components/mobile-shell'
+import { TabBar } from '@/components/tab-bar'
+import { TopBar } from '@/components/top-bar'
+import { Card } from '@/components/ui/card'
+import { requireCompleteUser } from '@/lib/auth/session'
+import { getMyPageBalanceSummary } from '@/lib/core/service'
 import { logoutAction } from './actions'
 
-export default function MyPage() {
-  const router = useRouter()
-  const { user, toast } = useApp()
+function formatPoints(value: number) {
+  return `${value.toLocaleString('ko-KR')}P`
+}
 
-  const genderLabel =
-    user.gender === 'female' ? '여성' : user.gender === 'male' ? '남성' : '선택 안 함'
+function maskStudentId(studentId: string) {
+  return studentId.length > 2
+    ? `${studentId.slice(0, 2)}${'•'.repeat(studentId.length - 2)}`
+    : studentId
+}
 
-  const menu = [
-    { icon: Bell, label: '알림 설정', onClick: () => toast('알림 설정은 준비 중이에요') },
-    { icon: ShieldCheck, label: '개인정보 보호', onClick: () => toast('개인정보는 방 안에서 일부만 공개돼요') },
-    { icon: FileText, label: '이용약관 · 정책', onClick: () => toast('약관 페이지는 준비 중이에요') },
-  ]
+export default async function MyPage() {
+  const user = await requireCompleteUser()
+  const balance = await getMyPageBalanceSummary(user.userId)
+  const totalPoints = balance.availablePoints + balance.heldPoints
 
   return (
     <MobileShell>
@@ -37,87 +36,112 @@ export default function MyPage() {
         title="마이페이지"
         backHref="/home"
         right={
-          <button
-            type="button"
-            onClick={() => router.push('/admin')}
-            className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            관리자
-          </button>
+          user.role === 'ADMIN' ? (
+            <Link
+              href="/admin"
+              className="flex min-h-11 items-center rounded-full border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              관리자
+            </Link>
+          ) : null
         }
       />
-      <div className="flex-1 overflow-y-auto px-5 pb-28 pt-4">
-        {/* Profile */}
-        <Card className="mb-4 flex items-center gap-4 p-5">
-          <div className="flex size-14 items-center justify-center rounded-full bg-primary/15 text-lg font-bold text-primary">
+
+      <main className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 pb-6 pt-4">
+        <Card className="flex items-center gap-4 p-5">
+          <div
+            className="flex size-14 items-center justify-center rounded-full bg-primary/15 text-lg font-bold text-primary"
+            aria-hidden
+          >
             {user.name.charAt(0)}
           </div>
           <div className="min-w-0">
             <p className="text-base font-bold text-foreground">{user.name}</p>
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
               <GraduationCap className="size-3.5" aria-hidden />
-              전북대학교 · {genderLabel}
+              학번 {maskStudentId(user.studentId)}
             </p>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">{user.email}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {user.schoolEmail}
+            </p>
           </div>
         </Card>
 
-        {/* Points summary */}
-        <Card
-          className="mb-6 cursor-pointer p-5 transition-colors hover:bg-card/70"
-          onClick={() => router.push('/points')}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-mint/15 text-mint">
-                <Wallet className="size-5" aria-hidden />
+        <section aria-labelledby="point-balance-heading">
+          <Link
+            href="/points"
+            aria-label={`포인트 상세 보기: 사용 가능 ${formatPoints(balance.availablePoints)}, 예치 중 ${formatPoints(balance.heldPoints)}`}
+            className="block rounded-[18px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <Card className="p-5 transition-colors hover:bg-muted">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-10 items-center justify-center rounded-xl bg-mint-soft text-mint">
+                    <Wallet className="size-5" aria-hidden />
+                  </span>
+                  <div>
+                    <h2 id="point-balance-heading" className="text-sm font-bold">
+                      포인트 잔액
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      상세 내역 보기
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">보유 포인트</p>
-                <p className="text-lg font-bold text-foreground">{formatPoints(user.points)}</p>
-              </div>
-            </div>
-            <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
-          </div>
-          {user.deposited > 0 && (
-            <p className="mt-3 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn-foreground">
-              예치 중 {formatPoints(user.deposited)} · 정산 후 반환돼요
-            </p>
-          )}
-        </Card>
 
-        {/* Menu list */}
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-          {menu.map((item, i) => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={item.onClick}
-              className={`flex w-full items-center justify-between px-4 py-4 text-left transition-colors hover:bg-muted ${
-                i !== menu.length - 1 ? 'border-b border-border' : ''
-              }`}
-            >
-              <span className="flex items-center gap-3 text-sm text-foreground">
-                <item.icon className="size-4 text-muted-foreground" aria-hidden />
-                {item.label}
-              </span>
-              <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
-            </button>
-          ))}
-        </div>
+              <dl className="mt-5 grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-muted px-3 py-3">
+                  <dt className="text-xs text-muted-foreground">사용 가능</dt>
+                  <dd className="mt-1 text-lg font-bold text-foreground">
+                    {formatPoints(balance.availablePoints)}
+                  </dd>
+                </div>
+                <div className="rounded-xl bg-muted px-3 py-3">
+                  <dt className="text-xs text-muted-foreground">예치 중</dt>
+                  <dd className="mt-1 text-lg font-bold text-foreground">
+                    {formatPoints(balance.heldPoints)}
+                  </dd>
+                </div>
+              </dl>
 
-        <form action={logoutAction}>
-        <button
-          type="submit"
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-card px-4 py-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              <p className="mt-3 text-xs text-muted-foreground">
+                총 {formatPoints(totalPoints)} · 포인트는 서비스 내 가상 정산 단위입니다.
+              </p>
+            </Card>
+          </Link>
+        </section>
+
+        {balance.heldPoints > 0 ? (
+          <p className="flex items-start gap-2 rounded-2xl bg-secondary/50 px-4 py-3 text-xs leading-relaxed text-secondary-foreground">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+            예치 중인 포인트는 이동 완료 후 최종 정산 결과에 따라 반환되거나 사용됩니다.
+          </p>
+        ) : null}
+
+        <Link
+          href="/support"
+          className="flex min-h-12 items-center justify-between rounded-2xl border border-border bg-card px-4 py-3 text-sm font-semibold transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
-          <LogOut className="size-4" aria-hidden />
-          로그아웃
-        </button>
+          <span className="flex items-center gap-2">
+            <MessageCircleQuestion className="size-4 text-info" aria-hidden />
+            고객 문의
+          </span>
+          <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+        </Link>
+
+        <form action={logoutAction} className="mt-2">
+          <button
+            type="submit"
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <LogOut className="size-4" aria-hidden />
+            로그아웃
+          </button>
         </form>
+      </main>
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">택시타쉐어 v0.1 · 전북대 캠퍼스 시범</p>
-      </div>
       <TabBar />
     </MobileShell>
   )

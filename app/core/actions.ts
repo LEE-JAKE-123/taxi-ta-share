@@ -10,6 +10,7 @@ import {
   CoreError,
   applyToTrip,
   approveParticipant,
+  cancelParticipation,
   cancelTrip,
   closeTrip,
   confirmFare,
@@ -29,6 +30,13 @@ import {
   submitFareDispute,
   withdrawFareDispute,
 } from '@/lib/core/service'
+import {
+  blockUser,
+  resolveSupportTicket,
+  resolveUserReport,
+  submitSupportTicket,
+  submitUserReport,
+} from '@/lib/safety/service'
 
 export type CreateTripState = {
   message?: string
@@ -295,6 +303,44 @@ export async function confirmTripAndDepositFromRoomAction(formData: FormData) {
     tripId,
     () => confirmTripAndDeposit(user.userId, tripId, idempotencyKey),
     '모집을 확정하고 전원 포인트 예치를 완료했습니다. 이제 출발할 수 있습니다.',
+  )
+}
+
+export async function cancelTripFromRoomAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = text(formData, 'tripId')
+  const idempotencyKey = text(formData, 'idempotencyKey')
+
+  if (!isUuid(tripId)) {
+    redirect(`/home?error=${encodeURIComponent('올바르지 않은 방 식별자입니다.')}`)
+  }
+  if (!isUuid(idempotencyKey)) {
+    completeRoom(tripId, '요청 식별자가 올바르지 않습니다.', true)
+  }
+
+  await executeRoom(
+    tripId,
+    () => cancelTrip(user.userId, tripId, idempotencyKey),
+    '모집을 취소했습니다. 예치 전이므로 포인트 변동은 없습니다.',
+  )
+}
+
+export async function cancelParticipationFromRoomAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = text(formData, 'tripId')
+  const idempotencyKey = text(formData, 'idempotencyKey')
+
+  if (!isUuid(tripId)) {
+    redirect(`/home?error=${encodeURIComponent('올바르지 않은 방 식별자입니다.')}`)
+  }
+  if (!isUuid(idempotencyKey)) {
+    completeRoom(tripId, '요청 식별자가 올바르지 않습니다.', true)
+  }
+
+  await executeRoom(
+    tripId,
+    () => cancelParticipation(user.userId, tripId, idempotencyKey),
+    '참여를 취소했습니다. 예치 전 취소이므로 포인트 변동은 없습니다.',
   )
 }
 
@@ -764,5 +810,142 @@ export async function settleJourneyAction(formData: FormData) {
       ),
     '최종 정산을 완료했습니다.',
   )
+}
+
+function finishSafety(
+  path: '/home' | '/support' | '/admin/reports' | `/room/${string}`,
+  message: string,
+  error = false,
+): never {
+  revalidatePath('/admin/reports')
+  revalidatePath('/support')
+  revalidatePath('/core')
+  revalidatePath('/home')
+  redirect(`${path}?${error ? 'error' : 'message'}=${encodeURIComponent(message)}`)
+}
+
+export async function submitSupportInquiryAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  try {
+    await submitSupportTicket({
+      requesterId: user.userId,
+      category: text(formData, 'category'),
+      subject: text(formData, 'subject'),
+      body: text(formData, 'body'),
+      idempotencyKey: text(formData, 'idempotencyKey'),
+    })
+  } catch (error) {
+    finishSafety(
+      '/support',
+      error instanceof CoreError
+        ? error.message
+        : '문의 접수에 실패했습니다. 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishSafety('/support', '문의가 접수되었습니다. 운영자 검토 후 답변하겠습니다.')
+}
+
+export async function resolveUserReportAction(formData: FormData) {
+  const admin = await requireAdmin()
+  const outcome = text(formData, 'outcome')
+  if (!['IN_REVIEW', 'RESOLVED', 'DISMISSED', 'SUSPENDED'].includes(outcome)) {
+    finishSafety('/admin/reports', '처리 결과가 올바르지 않습니다.', true)
+  }
+  try {
+    await resolveUserReport({
+      adminId: admin.userId,
+      reportId: text(formData, 'reportId'),
+      outcome: outcome as 'IN_REVIEW' | 'RESOLVED' | 'DISMISSED' | 'SUSPENDED',
+      resolutionNote: text(formData, 'resolutionNote'),
+      idempotencyKey: text(formData, 'idempotencyKey'),
+    })
+  } catch (error) {
+    finishSafety(
+      '/admin/reports',
+      error instanceof CoreError
+        ? error.message
+        : '신고 처리에 실패했습니다. 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishSafety('/admin/reports', '신고 처리 결과를 기록했습니다.')
+}
+
+export async function resolveSupportInquiryAction(formData: FormData) {
+  const admin = await requireAdmin()
+  const outcome = text(formData, 'outcome')
+  if (!['IN_REVIEW', 'ANSWERED', 'CLOSED'].includes(outcome)) {
+    finishSafety('/admin/reports', '처리 결과가 올바르지 않습니다.', true)
+  }
+  try {
+    await resolveSupportTicket({
+      adminId: admin.userId,
+      ticketId: text(formData, 'ticketId'),
+      outcome: outcome as 'IN_REVIEW' | 'ANSWERED' | 'CLOSED',
+      resolutionNote: text(formData, 'resolutionNote'),
+      idempotencyKey: text(formData, 'idempotencyKey'),
+    })
+  } catch (error) {
+    finishSafety(
+      '/admin/reports',
+      error instanceof CoreError
+        ? error.message
+        : '문의 처리에 실패했습니다. 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishSafety('/admin/reports', '문의 처리 결과를 기록했습니다.')
+}
+
+export async function submitUserReportFromRoomAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = text(formData, 'tripId')
+  if (!isUuid(tripId)) {
+    redirect('/home?error=' + encodeURIComponent('모집 식별자가 올바르지 않습니다.'))
+  }
+  try {
+    await submitUserReport({
+      reporterId: user.userId,
+      reportedUserId: text(formData, 'reportedUserId'),
+      reasonCode: text(formData, 'reasonCode'),
+      description: text(formData, 'description'),
+      evidenceRef: text(formData, 'evidenceRef') || null,
+      idempotencyKey: text(formData, 'idempotencyKey'),
+    })
+  } catch (error) {
+    finishSafety(
+      `/room/${tripId}`,
+      error instanceof CoreError
+        ? error.message
+        : '신고 접수에 실패했습니다. 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishSafety(`/room/${tripId}`, '신고가 접수되었습니다. 신고 내용은 대상 사용자에게 공개되지 않습니다.')
+}
+
+export async function blockUserFromRoomAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = text(formData, 'tripId')
+  if (!isUuid(tripId)) {
+    redirect('/home?error=' + encodeURIComponent('모집 식별자가 올바르지 않습니다.'))
+  }
+  try {
+    await blockUser({
+      blockerId: user.userId,
+      blockedUserId: text(formData, 'blockedUserId'),
+      idempotencyKey: text(formData, 'idempotencyKey'),
+    })
+  } catch (error) {
+    finishSafety(
+      `/room/${tripId}`,
+      error instanceof CoreError
+        ? error.message
+        : '차단 처리에 실패했습니다. 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishSafety('/home', '차단했습니다. 이후 서로의 신규 동승 신청과 승인은 제한됩니다.')
 }
 

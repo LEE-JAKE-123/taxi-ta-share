@@ -190,3 +190,64 @@ export async function getAdminUsers(actorId: string) {
     heldPoints: number
   }>
 }
+
+export async function getAdminSafetyDashboard(actorId: string) {
+  const sql = await requireAdminActor(actorId)
+  const [reports, tickets] = await Promise.all([
+    sql`
+      SELECT
+        r.report_id AS "reportId",
+        reporter.name AS "reporterName",
+        reported.name AS "reportedName",
+        r.trip_id AS "tripId",
+        r.reason_code AS "reasonCode",
+        r.description,
+        r.evidence_ref AS "evidenceRef",
+        r.status,
+        r.created_at AS "createdAt"
+      FROM user_reports r
+      JOIN users reporter ON reporter.user_id = r.reporter_user_id
+      LEFT JOIN users reported ON reported.user_id = r.reported_user_id
+      WHERE r.status IN ('SUBMITTED', 'IN_REVIEW')
+      ORDER BY r.created_at, r.report_id
+      LIMIT 100
+    `,
+    sql`
+      SELECT
+        t.ticket_id AS "ticketId",
+        requester.name AS "requesterName",
+        t.category,
+        t.subject,
+        t.body,
+        t.status,
+        t.created_at AS "createdAt"
+      FROM support_tickets t
+      JOIN users requester ON requester.user_id = t.requester_user_id
+      WHERE t.status IN ('SUBMITTED', 'IN_REVIEW')
+      ORDER BY t.created_at, t.ticket_id
+      LIMIT 100
+    `,
+  ])
+  return {
+    reports: reports as unknown as Array<{
+      reportId: string
+      reporterName: string
+      reportedName: string | null
+      tripId: string | null
+      reasonCode: string
+      description: string
+      evidenceRef: string | null
+      status: string
+      createdAt: string
+    }>,
+    tickets: tickets as unknown as Array<{
+      ticketId: string
+      requesterName: string
+      category: string
+      subject: string
+      body: string
+      status: string
+      createdAt: string
+    }>,
+  }
+}

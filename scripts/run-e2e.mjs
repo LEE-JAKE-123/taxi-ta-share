@@ -28,7 +28,14 @@ Object.assign(process.env, {
 for (const [command, args] of [
   [process.execPath, ['scripts/migrate.mjs']],
   [process.execPath, ['scripts/verify-db.mjs']],
-  [process.execPath, ['node_modules/@playwright/test/cli.js', 'test']],
+  [
+    process.execPath,
+    [
+      'node_modules/@playwright/test/cli.js',
+      'test',
+      ...process.argv.slice(2),
+    ],
+  ],
 ]) {
   const result = spawnSync(command, args, { stdio: 'inherit', env: process.env })
   if (result.error) throw result.error

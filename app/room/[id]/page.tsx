@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { Clock, MapPin, Play, ShieldCheck, UsersRound } from 'lucide-react'
+import { Clock, Flag, MapPin, Play, ShieldCheck, UserX, UsersRound } from 'lucide-react'
 import {
   approveFromRoomAction,
   applyFromRoomAction,
+  blockUserFromRoomAction,
+  cancelParticipationFromRoomAction,
+  cancelTripFromRoomAction,
   closeTripFromRoomAction,
   confirmTripAndDepositFromRoomAction,
   setDesignatedFareSubmitterAction,
   startTripFromRoomAction,
+  submitUserReportFromRoomAction,
 } from '@/app/core/actions'
 import { ArrivalSettlementControl } from '@/components/arrival-settlement-control'
 import { Avatar } from '@/components/avatar'
@@ -59,10 +63,16 @@ export default async function RoomDetailPage({
     ? roomParticipants.filter((participant) => participant.status === 'APPLIED')
     : []
   const confirmedParticipants = roomParticipants.filter(
-    (participant) => participant.status !== 'APPLIED',
+    (participant) =>
+      participant.status !== 'APPLIED' && participant.status !== 'CANCELLED',
   )
   const canApprove =
     isHost && room.status === 'OPEN' && departureOpen && !isAtCapacity
+  const canCancelParticipation =
+    !isHost &&
+    room.status === 'OPEN' &&
+    departureOpen &&
+    ['APPLIED', 'APPROVED'].includes(room.currentUserStatus ?? '')
   const canEnterJourney =
     ['CONFIRMED', 'IN_PROGRESS', 'SETTLEMENT_PENDING', 'COMPLETED'].includes(
       room.status,
@@ -73,6 +83,17 @@ export default async function RoomDetailPage({
   const canSubmitFare =
     room.status === 'IN_PROGRESS' &&
     (isHost || room.fareSubmitterUserId === user.userId)
+  const safetyTargets = isHost
+    ? roomParticipants.filter(
+        (participant) =>
+          participant.userId !== user.userId && participant.status !== 'CANCELLED',
+      )
+    : [
+        {
+          userId: room.hostUserId,
+          name: room.hostName,
+        },
+      ]
 
   return (
     <MobileShell withTabBar={false}>
@@ -256,6 +277,82 @@ export default async function RoomDetailPage({
           )}
         </Card>
 
+        {safetyTargets.length ? (
+          <Card className="gap-3">
+            <CardTitle>안전 신고·차단</CardTitle>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              신고 내용은 대상 사용자에게 공개되지 않습니다. 차단해도 이미 확정·예치된
+              참여와 정산은 바뀌지 않으며, 이후 신규 동승 신청과 승인이 제한됩니다.
+            </p>
+            <div className="flex flex-col gap-2">
+              {safetyTargets.map((target) => (
+                <details
+                  key={target.userId}
+                  className="rounded-xl border border-border px-3 py-2"
+                >
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    {isHost ? target.name : maskName(target.name)} 신고·차단
+                  </summary>
+                  <div className="mt-3 flex flex-col gap-3">
+                    <form action={blockUserFromRoomAction}>
+                      <input type="hidden" name="tripId" value={room.tripId} />
+                      <input type="hidden" name="blockedUserId" value={target.userId} />
+                      <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                      <PendingSubmitButton
+                        pendingLabel="차단 처리 중..."
+                        className="border border-warn bg-background text-warn-foreground"
+                      >
+                        <UserX className="size-4" aria-hidden />
+                        차단하기
+                      </PendingSubmitButton>
+                    </form>
+                    <form action={submitUserReportFromRoomAction} className="flex flex-col gap-2">
+                      <input type="hidden" name="tripId" value={room.tripId} />
+                      <input type="hidden" name="reportedUserId" value={target.userId} />
+                      <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                      <label htmlFor={`report-reason-${target.userId}`} className="text-sm font-semibold">
+                        신고 사유
+                      </label>
+                      <select id={`report-reason-${target.userId}`} name="reasonCode" className="app-input" required defaultValue="">
+                        <option value="" disabled>사유를 선택해주세요</option>
+                        <option value="SAFETY">안전 우려</option>
+                        <option value="HARASSMENT">괴롭힘·부적절한 언행</option>
+                        <option value="NO_SHOW">노쇼 관련</option>
+                        <option value="FRAUD">사기·허위 정보 의심</option>
+                        <option value="OTHER">기타</option>
+                      </select>
+                      <label htmlFor={`report-description-${target.userId}`} className="text-sm font-semibold">
+                        신고 내용
+                      </label>
+                      <textarea
+                        id={`report-description-${target.userId}`}
+                        name="description"
+                        className="app-input min-h-24 resize-y"
+                        minLength={10}
+                        maxLength={2000}
+                        required
+                      />
+                      <label htmlFor={`report-evidence-${target.userId}`} className="text-sm font-semibold">
+                        증빙 설명 <span className="font-normal text-muted-foreground">(선택)</span>
+                      </label>
+                      <input
+                        id={`report-evidence-${target.userId}`}
+                        name="evidenceRef"
+                        className="app-input"
+                        maxLength={2000}
+                      />
+                      <PendingSubmitButton pendingLabel="신고 접수 중...">
+                        <Flag className="size-4" aria-hidden />
+                        신고 접수
+                      </PendingSubmitButton>
+                    </form>
+                  </div>
+                </details>
+              ))}
+            </div>
+          </Card>
+        ) : null}
+
         {isHost && room.status === 'CLOSED' ? (
           <Card className="gap-3">
             <CardTitle>모집 마감 · 예치 진행</CardTitle>
@@ -318,7 +415,7 @@ export default async function RoomDetailPage({
       </main>
 
       {isHost && room.status === 'OPEN' ? (
-        <BottomBar>
+        <BottomBar className="flex flex-col gap-2">
           <form action={closeTripFromRoomAction}>
             <input type="hidden" name="tripId" value={room.tripId} />
             <input
@@ -331,6 +428,16 @@ export default async function RoomDetailPage({
               disabled={!departureOpen}
             >
               모집 종료
+            </PendingSubmitButton>
+          </form>
+          <form action={cancelTripFromRoomAction}>
+            <input type="hidden" name="tripId" value={room.tripId} />
+            <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+            <PendingSubmitButton
+              pendingLabel="모집 취소 처리 중..."
+              className="border border-warn bg-background text-warn-foreground"
+            >
+              모집 취소
             </PendingSubmitButton>
           </form>
         </BottomBar>
@@ -391,7 +498,18 @@ export default async function RoomDetailPage({
         </BottomBar>
       ) : !isHost ? (
         <BottomBar>
-          {canApply ? (
+          {canCancelParticipation ? (
+            <form action={cancelParticipationFromRoomAction}>
+              <input type="hidden" name="tripId" value={room.tripId} />
+              <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+              <PendingSubmitButton
+                pendingLabel="참여 취소 처리 중..."
+                className="border border-warn bg-background text-warn-foreground"
+              >
+                참여 취소
+              </PendingSubmitButton>
+            </form>
+          ) : canApply ? (
             <form action={applyFromRoomAction}>
               <input type="hidden" name="tripId" value={room.tripId} />
               <input type="hidden" name="idempotencyKey" value={randomUUID()} />

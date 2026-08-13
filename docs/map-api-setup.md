@@ -22,7 +22,7 @@
 입력 오류는 `400`이다. 모든 공급자 요청은 `no-store`이며 8초 후 중단된다.
 
 Kakao Developers의 JavaScript SDK 도메인에는 실제 고정 Production 도메인을
-경로 없이 등록한다. 현재 운영 도메인은 `https://taxi-ta-share.vercel.app`이다.
+경로 없이 등록한다. 현재 운영 도메인은 `https://taxi-ta-share-phi.vercel.app`이다.
 
 ## 배포 확인
 

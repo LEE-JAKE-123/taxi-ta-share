@@ -30,7 +30,7 @@ describe('isDemoAdminLoginAllowed', () => {
         studentId: '123456789',
         name: '택시타쉐어관리자',
         enabled: 'true',
-        host: 'taxi-ta-share.vercel.app',
+        host: 'taxi-ta-share-phi.vercel.app',
       }),
     ).toBe(true)
   })
@@ -38,10 +38,11 @@ describe('isDemoAdminLoginAllowed', () => {
   it.each([
     'evil.example',
     'localhost:3000',
+    'taxi-ta-share.vercel.app',
     'taxi-ta-share-git-main-example.vercel.app',
-    'preview.taxi-ta-share.vercel.app',
-    'taxi-ta-share.vercel.app:443',
-    'TAXI-TA-SHARE.VERCEL.APP',
+    'preview.taxi-ta-share-phi.vercel.app',
+    'taxi-ta-share-phi.vercel.app:443',
+    'TAXI-TA-SHARE-PHI.VERCEL.APP',
     null,
   ])('blocks the production demo admin login for host %s', (host) => {
     expect(
@@ -65,7 +66,7 @@ describe('isDemoAdminLoginAllowed', () => {
           studentId,
           name,
           enabled: 'true',
-          host: 'taxi-ta-share.vercel.app',
+          host: 'taxi-ta-share-phi.vercel.app',
         }),
       ).toBe(false)
     },
@@ -77,7 +78,7 @@ describe('isDemoAdminLoginAllowed', () => {
         studentId: '123456789',
         name: '택시타쉐어관리자',
         enabled: 'false',
-        host: 'taxi-ta-share.vercel.app',
+        host: 'taxi-ta-share-phi.vercel.app',
       }),
     ).toBe(false)
   })

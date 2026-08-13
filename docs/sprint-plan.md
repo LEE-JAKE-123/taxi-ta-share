@@ -293,7 +293,7 @@
 - [x] 관리자 조회에서 학교 이메일·이름 전체 목록을 제거하고 자기 지급과
   ADMIN 대상 지급을 서버에서 차단한다. `FR-31~31b`, `FR-40`, `TR-01`
 - [x] `123456789 / 택시타쉐어관리자` 로그인은
-  `taxi-ta-share.vercel.app`에서 `DEMO_ADMIN_LOGIN_ENABLED=true`이고 실제 DB
+  `taxi-ta-share-phi.vercel.app`에서 `DEMO_ADMIN_LOGIN_ENABLED=true`이고 실제 DB
   계정이 `ACTIVE ADMIN`일 때만 허용하며 성공 시 `/admin`으로 이동한다.
 - [>] 실제 경유 waypoint 기반 추가 거리·시간과 recommendation evidence v3 저장은
   후속 구현한다. 현재 퍼센트는 후보의 실제 저장 경로 거리 대비 출발·도착 endpoint

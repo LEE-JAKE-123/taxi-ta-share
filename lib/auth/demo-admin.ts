@@ -1,6 +1,6 @@
 export const DEMO_ADMIN_STUDENT_ID = '123456789'
 export const DEMO_ADMIN_NAME = '택시타쉐어관리자'
-export const DEMO_ADMIN_PRODUCTION_HOST = 'taxi-ta-share.vercel.app'
+export const DEMO_ADMIN_PRODUCTION_HOST = 'taxi-ta-share-phi.vercel.app'
 
 export function isDemoAdminLoginAllowed(input: {
   studentId: string

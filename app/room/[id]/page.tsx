@@ -433,11 +433,15 @@ export default async function RoomDetailPage({
           <form action={cancelTripFromRoomAction}>
             <input type="hidden" name="tripId" value={room.tripId} />
             <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+            <p className="mb-2 text-xs text-muted-foreground">
+              방을 취소하면 참여 신청과 승인이 함께 취소되며, 기록은 보존됩니다.
+            </p>
             <PendingSubmitButton
-              pendingLabel="모집 취소 처리 중..."
+              pendingLabel="방 취소 처리 중..."
               className="border border-warn bg-background text-warn-foreground"
+              disabled={!departureOpen}
             >
-              모집 취소
+              방 취소
             </PendingSubmitButton>
           </form>
         </BottomBar>

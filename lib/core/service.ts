@@ -43,6 +43,80 @@ type TripRow = {
   fareSubmitterUserId: string | null
 }
 
+export async function getDiscoverableTrips(userId: string) {
+  await ensureDatabaseIdentity()
+  const sql = getDatabase()
+  const trips = await sql`
+    SELECT
+      g.trip_id AS "tripId",
+      g.host_user_id AS "hostUserId",
+      host.name AS "hostName",
+      g.origin,
+      g.destination,
+      g.departure_at AS "departureAt",
+      g.max_participants AS "maxParticipants",
+      g.estimated_fare AS "estimatedFare",
+      g.origin_latitude::float8 AS "originLatitude",
+      g.origin_longitude::float8 AS "originLongitude",
+      g.destination_latitude::float8 AS "destinationLatitude",
+      g.destination_longitude::float8 AS "destinationLongitude",
+      g.fare_submitter_user_id AS "fareSubmitterUserId",
+      g.status,
+      count(p.user_id) FILTER (
+        WHERE p.status IN (
+          'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+          'NO_SHOW', 'DISPUTED', 'COMPLETED'
+        )
+      )::int AS "approvedCount",
+      mine.status AS "currentUserStatus",
+      (
+        g.departure_at > now()
+        AND g.origin_latitude IS NOT NULL
+        AND g.origin_longitude IS NOT NULL
+        AND g.destination_latitude IS NOT NULL
+        AND g.destination_longitude IS NOT NULL
+        AND g.destination_place_provider IS NOT NULL
+        AND g.destination_provider_place_id IS NOT NULL
+      ) AS "hasRecommendationLocation"
+    FROM trip_groups g
+    JOIN users host ON host.user_id = g.host_user_id
+    LEFT JOIN trip_participants p ON p.trip_id = g.trip_id
+    LEFT JOIN trip_participants mine
+      ON mine.trip_id = g.trip_id AND mine.user_id = ${userId}
+    WHERE g.status = 'OPEN'
+      AND g.departure_at > now()
+      AND (
+        mine.user_id IS NOT NULL
+        OR NOT EXISTS (
+          SELECT 1
+          FROM trip_participants safety_participant
+          JOIN user_blocks block ON (
+            (block.blocker_user_id = ${userId}
+              AND block.blocked_user_id = safety_participant.user_id)
+            OR (block.blocker_user_id = safety_participant.user_id
+              AND block.blocked_user_id = ${userId})
+          )
+          WHERE safety_participant.trip_id = g.trip_id
+            AND safety_participant.user_id <> ${userId}
+            AND safety_participant.status IN (
+              'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+              'NO_SHOW', 'DISPUTED', 'COMPLETED'
+            )
+        )
+    )
+    GROUP BY g.trip_id, host.name, mine.status
+    HAVING count(p.user_id) FILTER (
+      WHERE p.status IN (
+        'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+        'NO_SHOW', 'DISPUTED', 'COMPLETED'
+      )
+    ) < g.max_participants
+    ORDER BY g.created_at DESC
+  `
+
+  return trips as unknown as TripRow[]
+}
+
 export async function getCoreDashboard(userId: string, isAdmin: boolean) {
   await closeDueTrips()
   await ensureDatabaseIdentity()

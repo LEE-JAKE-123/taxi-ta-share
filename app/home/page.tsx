@@ -8,7 +8,7 @@ import { RecommendationCard } from '@/components/recommendation-card'
 import { PlaceRecommendationSearch } from '@/components/place-recommendation-search'
 import { TabBar } from '@/components/tab-bar'
 import { requireCompleteUser } from '@/lib/auth/session'
-import { getCoreDashboard } from '@/lib/core/service'
+import { getCoreDashboard, getDiscoverableTrips } from '@/lib/core/service'
 import { parseRecommendationSeedParam } from '@/lib/recommendations/seed'
 import { getTripRecommendations } from '@/lib/recommendations/service'
 
@@ -20,8 +20,9 @@ export default async function HomePage({
   const { recommendFrom } = await searchParams
   const explicitSeedTripId = parseRecommendationSeedParam(recommendFrom)
   const user = await requireCompleteUser()
-  const [data, recommendationFeed] = await Promise.all([
+  const [data, discoverableTrips, recommendationFeed] = await Promise.all([
     getCoreDashboard(user.userId, user.role === 'ADMIN'),
+    getDiscoverableTrips(user.userId),
     getTripRecommendations(user.userId, explicitSeedTripId),
   ])
 
@@ -134,9 +135,9 @@ export default async function HomePage({
             실제 등록된 방의 출발 정보와 참여 현황을 확인하세요.
           </p>
 
-          {data.trips.length > 0 ? (
+          {discoverableTrips.length > 0 ? (
             <div className="mt-4 flex flex-col gap-4">
-              {data.trips.map((room) => (
+              {discoverableTrips.map((room) => (
                 <DatabaseRoomCard
                   key={room.tripId}
                   room={room}

@@ -162,8 +162,9 @@ export async function createRoomAction(
   revalidatePath('/core')
   revalidatePath('/home')
   revalidatePath('/my-rooms')
+  revalidatePath(`/room/${tripId}`)
   redirect(
-    `/core?message=${encodeURIComponent('방을 만들었습니다.')}&trip=${tripId}`,
+    `/room/${tripId}?message=${encodeURIComponent('방을 만들었습니다.')}`,
   )
 }
 
@@ -318,10 +319,25 @@ export async function cancelTripFromRoomAction(formData: FormData) {
     completeRoom(tripId, '요청 식별자가 올바르지 않습니다.', true)
   }
 
-  await executeRoom(
-    tripId,
-    () => cancelTrip(user.userId, tripId, idempotencyKey),
-    '모집을 취소했습니다. 예치 전이므로 포인트 변동은 없습니다.',
+  try {
+    await cancelTrip(user.userId, tripId, idempotencyKey)
+  } catch (error) {
+    completeRoom(
+      tripId,
+      error instanceof CoreError
+        ? error.message
+        : '모집을 취소하지 못했습니다. 새로고침한 뒤 다시 시도해 주세요.',
+      true,
+    )
+  }
+
+  revalidatePath('/home')
+  revalidatePath('/my-rooms')
+  revalidatePath(`/room/${tripId}`)
+  redirect(
+    `/my-rooms?message=${encodeURIComponent(
+      '방을 취소했습니다. 예치 전이므로 포인트 변동은 없습니다.',
+    )}`,
   )
 }
 

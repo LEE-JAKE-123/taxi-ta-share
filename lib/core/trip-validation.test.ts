@@ -25,6 +25,7 @@ describe('createTripSchema', () => {
     expect(result.origin).toBe('전북대학교 정문')
     expect(result.originLatitude).toBe(35.846)
     expect(result.maxParticipants).toBe(3)
+    expect(result.hostMemo).toBe('')
   })
 
   it.each([
@@ -35,6 +36,7 @@ describe('createTripSchema', () => {
     { originProviderPlaceId: '' },
     { destinationProvider: 'fixture' },
     { departureAt: '2020-01-01T00:00:00.000Z' },
+    { hostMemo: '가'.repeat(61) },
   ])('rejects invalid route creation input: %o', (patch) => {
     expect(createTripSchema.safeParse({ ...valid, ...patch }).success).toBe(false)
   })

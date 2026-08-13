@@ -24,6 +24,10 @@ export const createTripSchema = z.object({
   destinationProvider: z.enum(['naver', 'kakao']),
   destinationProviderPlaceId: z.string().trim().min(1).max(300),
   destinationSelectionToken: z.string().trim().min(1).max(2000),
+  hostMemo: z.preprocess(
+    (value) => (typeof value === 'string' ? value : ''),
+    z.string().trim().max(60, '방장 메모는 60자 이하여야 합니다.'),
+  ),
   departureAt: departureAtSchema.refine(
     (value) => value.getTime() > Date.now(),
     '출발 시각은 현재 이후여야 합니다.',
@@ -40,7 +44,7 @@ export function parseCreateTripForm(formData: FormData) {
     'originProviderPlaceId', 'originSelectionToken', 'destination', 'destinationLatitude',
     'destinationLongitude', 'destinationProvider', 'destinationProviderPlaceId',
     'destinationSelectionToken',
-    'departureAt', 'maxParticipants', 'idempotencyKey',
+    'hostMemo', 'departureAt', 'maxParticipants', 'idempotencyKey',
   ] as const
   return createTripSchema.safeParse(
     Object.fromEntries(fields.map((field) => [field, formData.get(field)])),

@@ -154,6 +154,15 @@ export default async function RoomDetailPage({
           />
         ) : null}
 
+        {room.hostMemo ? (
+          <Card className="gap-3">
+            <CardTitle>방장 전달사항</CardTitle>
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              {room.hostMemo}
+            </p>
+          </Card>
+        ) : null}
+
         <Card className="gap-3">
           <CardTitle>예상 분담금</CardTitle>
           <dl className="flex flex-col gap-3 text-sm">
@@ -416,33 +425,50 @@ export default async function RoomDetailPage({
 
       {isHost && room.status === 'OPEN' ? (
         <BottomBar className="flex flex-col gap-2">
-          <form action={closeTripFromRoomAction}>
-            <input type="hidden" name="tripId" value={room.tripId} />
-            <input
-              type="hidden"
-              name="idempotencyKey"
-              value={randomUUID()}
-            />
-            <PendingSubmitButton
-              pendingLabel="모집을 종료하는 중…"
-              disabled={!departureOpen}
-            >
-              모집 종료
-            </PendingSubmitButton>
-          </form>
-          <form action={cancelTripFromRoomAction}>
-            <input type="hidden" name="tripId" value={room.tripId} />
-            <input type="hidden" name="idempotencyKey" value={randomUUID()} />
-            <p className="mb-2 text-xs text-muted-foreground">
-              방을 취소하면 참여 신청과 승인이 함께 취소되며, 기록은 보존됩니다.
+          <div className="grid grid-cols-2 gap-2">
+            <form action={closeTripFromRoomAction}>
+              <input type="hidden" name="tripId" value={room.tripId} />
+              <input
+                type="hidden"
+                name="idempotencyKey"
+                value={randomUUID()}
+              />
+              <PendingSubmitButton
+                pendingLabel="모집을 종료하는 중…"
+                disabled={!departureOpen}
+                className="min-h-11 rounded-xl px-3 py-2 text-sm"
+              >
+                모집 종료
+              </PendingSubmitButton>
+            </form>
+          </div>
+          <form
+            action={cancelTripFromRoomAction}
+            className="rounded-xl border border-destructive/30 bg-destructive/10 p-3"
+          >
+            <p className="text-sm font-semibold text-destructive">방을 취소할까요?</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              참여 신청과 승인이 함께 취소됩니다. 예치 전 취소이므로 포인트 변동은 없습니다.
             </p>
-            <PendingSubmitButton
-              pendingLabel="방 취소 처리 중..."
-              className="border border-warn bg-background text-warn-foreground"
-              disabled={!departureOpen}
-            >
-              방 취소
-            </PendingSubmitButton>
+            <label className="mt-3 flex items-start gap-2 text-xs font-semibold text-foreground">
+              <input
+                type="checkbox"
+                required
+                className="mt-0.5 size-4 accent-primary"
+              />
+              위 영향을 확인했고 방 취소에 동의합니다.
+            </label>
+            <div className="mt-3">
+              <input type="hidden" name="tripId" value={room.tripId} />
+              <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+              <PendingSubmitButton
+                pendingLabel="방 취소 처리 중..."
+                className="min-h-11 rounded-xl border border-destructive/30 bg-background px-3 py-2 text-sm text-destructive"
+                disabled={!departureOpen}
+              >
+                방 취소
+              </PendingSubmitButton>
+            </div>
           </form>
         </BottomBar>
       ) : isHost && room.status === 'CLOSED' ? (

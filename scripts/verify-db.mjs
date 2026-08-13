@@ -73,6 +73,9 @@ const designatedFareSubmissionGuardMigrationChecksum = createHash('sha256')
     await readFile('db/migrations/0020_designated_fare_submission_guard.sql'),
   )
   .digest('hex')
+const tripGroupHostMemoMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0021_trip_group_host_memo.sql'))
+  .digest('hex')
 
 if (
   !databaseUrl ||
@@ -246,6 +249,34 @@ try {
           AND checksum = $19
           AND environment = $1
       ) AS designated_fare_submission_guard_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0021_trip_group_host_memo'
+          AND checksum = $20
+          AND environment = $1
+      ) AS trip_group_host_memo_migration_valid,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'trip_groups'
+          AND column_name = 'host_memo'
+          AND is_nullable = 'YES'
+      ) AS trip_group_host_memo_column_exists,
+      EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'trip_groups'::regclass
+          AND conname = 'trip_groups_host_memo_valid'
+          AND convalidated
+      ) AS trip_group_host_memo_constraint_exists,
+      (
+        SELECT count(*) = 0
+        FROM trip_groups
+        WHERE host_memo IS NOT NULL
+          AND (host_memo ~ E'^\\s*$' OR char_length(host_memo) > 60)
+      ) AS trip_group_host_memos_valid,
       to_regclass('public.user_blocks') IS NOT NULL AS user_blocks_exists,
       to_regclass('public.user_reports') IS NOT NULL AS user_reports_exists,
       to_regclass('public.report_review_actions') IS NOT NULL
@@ -680,6 +711,7 @@ try {
     systemDeadlineSettlementMigrationChecksum,
     safetyReportsMigrationChecksum,
     designatedFareSubmissionGuardMigrationChecksum,
+    tripGroupHostMemoMigrationChecksum,
   ])
 
   const verification = result.rows[0]

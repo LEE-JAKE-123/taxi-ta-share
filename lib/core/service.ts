@@ -41,6 +41,7 @@ type TripRow = {
   destinationLatitude: number | null
   destinationLongitude: number | null
   fareSubmitterUserId: string | null
+  hostMemo: string | null
 }
 
 export async function getDiscoverableTrips(userId: string) {
@@ -61,6 +62,13 @@ export async function getDiscoverableTrips(userId: string) {
       g.destination_latitude::float8 AS "destinationLatitude",
       g.destination_longitude::float8 AS "destinationLongitude",
       g.fare_submitter_user_id AS "fareSubmitterUserId",
+      CASE
+        WHEN mine.status IN (
+          'APPLIED', 'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+          'NO_SHOW', 'DISPUTED', 'COMPLETED'
+        ) THEN g.host_memo
+        ELSE NULL
+      END AS "hostMemo",
       g.status,
       count(p.user_id) FILTER (
         WHERE p.status IN (
@@ -142,6 +150,13 @@ export async function getCoreDashboard(userId: string, isAdmin: boolean) {
           g.destination_latitude::float8 AS "destinationLatitude",
           g.destination_longitude::float8 AS "destinationLongitude",
           g.fare_submitter_user_id AS "fareSubmitterUserId",
+          CASE
+            WHEN mine.status IN (
+              'APPLIED', 'APPROVED', 'DEPOSITED', 'CHECKED_IN',
+              'NO_SHOW', 'DISPUTED', 'COMPLETED'
+            ) THEN g.host_memo
+            ELSE NULL
+          END AS "hostMemo",
           g.status,
           count(p.user_id) FILTER (
             WHERE p.status IN (
@@ -640,12 +655,14 @@ export async function createTrip(input: {
   destinationProvider: RoutingProvider
   destinationProviderPlaceId: string
   destinationSelectionToken: string
+  hostMemo: string
   departureAt: Date
   maxParticipants: number
   idempotencyKey: string
 }) {
   await ensureDatabaseIdentity()
   const sql = getDatabase()
+  const hostMemo = input.hostMemo.trim() || null
   const replayRows = await sql`
     SELECT trip_id AS "tripId", origin, destination,
            departure_at AS "departureAt",
@@ -657,7 +674,8 @@ export async function createTrip(input: {
            destination_latitude::float8 AS "destinationLatitude",
            destination_longitude::float8 AS "destinationLongitude",
            destination_place_provider AS "destinationProvider",
-           destination_provider_place_id AS "destinationProviderPlaceId"
+           destination_provider_place_id AS "destinationProviderPlaceId",
+           host_memo AS "hostMemo"
     FROM trip_groups
     WHERE host_user_id = ${input.actorId}
       AND creation_idempotency_key = ${input.idempotencyKey}
@@ -676,6 +694,7 @@ export async function createTrip(input: {
       Number(row.destinationLongitude) === input.destinationLongitude &&
       row.destinationProvider === input.destinationProvider &&
       row.destinationProviderPlaceId === input.destinationProviderPlaceId.trim() &&
+      (row.hostMemo ?? null) === hostMemo &&
       new Date(String(row.departureAt)).getTime() === input.departureAt.getTime() &&
       Number(row.maxParticipants) === input.maxParticipants
     if (!same) throw new CoreError('이미 사용한 요청 식별자입니다. 페이지를 새로 열어 다시 시도해 주세요.')
@@ -729,7 +748,7 @@ export async function createTrip(input: {
               origin_latitude, origin_longitude, origin_place_provider,
               origin_provider_place_id, destination_latitude,
               destination_longitude, destination_place_provider,
-              destination_provider_place_id
+              destination_provider_place_id, host_memo
        FROM trip_groups
        WHERE host_user_id = $1 AND creation_idempotency_key = $2`,
       [input.actorId, input.idempotencyKey],
@@ -747,6 +766,7 @@ export async function createTrip(input: {
         Number(row.destination_longitude) === input.destinationLongitude &&
         row.destination_place_provider === input.destinationProvider &&
         row.destination_provider_place_id === input.destinationProviderPlaceId.trim() &&
+        (row.host_memo ?? null) === hostMemo &&
         new Date(row.departure_at).getTime() === input.departureAt.getTime() &&
         Number(row.max_participants) === input.maxParticipants
       if (!same) {
@@ -770,16 +790,16 @@ export async function createTrip(input: {
          origin_place_provider, origin_provider_place_id,
          destination_latitude, destination_longitude, destination_location_source,
          destination_place_provider, destination_provider_place_id,
-         departure_at, max_participants, estimated_fare, creation_idempotency_key
+         host_memo, departure_at, max_participants, estimated_fare, creation_idempotency_key
        ) VALUES (
-         $1,$2,$3,$4,$5,'SEARCH',$6,$7,$8,$9,'SEARCH',$10,$11,$12,$13,$14,$15
+         $1,$2,$3,$4,$5,'SEARCH',$6,$7,$8,$9,'SEARCH',$10,$11,$12,$13,$14,$15,$16
        ) RETURNING trip_id, location_revision`,
       [
         input.actorId, input.origin.trim(), input.destination.trim(),
         input.originLatitude, input.originLongitude, input.originProvider,
         input.originProviderPlaceId.trim(), input.destinationLatitude,
         input.destinationLongitude, input.destinationProvider,
-        input.destinationProviderPlaceId.trim(), input.departureAt,
+        input.destinationProviderPlaceId.trim(), hostMemo, input.departureAt,
         input.maxParticipants, estimate.estimatedFareWon, input.idempotencyKey,
       ],
     )

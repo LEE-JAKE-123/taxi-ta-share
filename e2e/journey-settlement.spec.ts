@@ -9,6 +9,7 @@ type JourneyFixture = {
   noShowId: string
   hostToken: string
   memberToken: string
+  noShowToken: string
 }
 
 function database() {
@@ -28,6 +29,7 @@ async function seedConfirmedJourney(): Promise<JourneyFixture> {
   const tripId = randomUUID()
   const hostToken = randomBytes(32).toString('base64url')
   const memberToken = randomBytes(32).toString('base64url')
+  const noShowToken = randomBytes(32).toString('base64url')
   const participantIds = [hostId, memberId, noShowId]
 
   try {
@@ -53,7 +55,11 @@ async function seedConfirmedJourney(): Promise<JourneyFixture> {
         ],
       )
     }
-    for (const [userId, token] of [[hostId, hostToken], [memberId, memberToken]] as const) {
+    for (const [userId, token] of [
+      [hostId, hostToken],
+      [memberId, memberToken],
+      [noShowId, noShowToken],
+    ] as const) {
       await client.query(
         `INSERT INTO auth_sessions (user_id, token_hash, expires_at)
          VALUES ($1, $2, now() + interval '1 hour')`,
@@ -132,7 +138,15 @@ async function seedConfirmedJourney(): Promise<JourneyFixture> {
       [tripId, fareEstimateId],
     )
     await client.query('COMMIT')
-    return { tripId, hostId, memberId, noShowId, hostToken, memberToken }
+    return {
+      tripId,
+      hostId,
+      memberId,
+      noShowId,
+      hostToken,
+      memberToken,
+      noShowToken,
+    }
   } catch (error) {
     await client.query('ROLLBACK')
     throw error
@@ -173,6 +187,7 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
   const fixture = await seedConfirmedJourney()
   const host = await pageForUser(browser, fixture.hostToken)
   const member = await pageForUser(browser, fixture.memberToken)
+  const noShow = await pageForUser(browser, fixture.noShowToken)
 
   try {
     await host.page.goto(`/room/${fixture.tripId}`)
@@ -224,8 +239,138 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
       `SELECT user_id, available_points, held_points FROM point_accounts WHERE user_id = ANY($1::uuid[]) AND (available_points <> 2500 OR held_points <> 5000)`,
       [[fixture.hostId, fixture.memberId, fixture.noShowId]],
     )).toHaveLength(0)
+
+    // Submit a lower actual fare through the host UI. This inserts the host's
+    // confirmation, while the checked-in member and no-show confirm separately.
+    await host.page.goto(`/room/${fixture.tripId}`)
+    const openFareModal = host.page.getByRole('button', { name: '도착' })
+    await openFareModal.click()
+    const fareForm = host.page.locator('form').filter({
+      has: host.page.locator('input[name="actualFare"]'),
+    })
+    await fareForm.locator('input[name="actualFare"]').fill('12000')
+    await fareForm.getByRole('button', { name: '실제 요금 제출' }).click()
+    await expect(host.page).toHaveURL(new RegExp(`/room/${fixture.tripId}/settle`), {
+      timeout: 30_000,
+    })
+    await expect(host.page.getByText('12,000P')).toBeVisible()
+
+    const [submitted] = await queryRows<{
+      status: string
+      actual_fare: number
+      participant_count: number
+      final_share: number
+      submitted_by: string
+    }>(
+      `SELECT status, actual_fare, participant_count, final_share, submitted_by
+       FROM trip_settlements WHERE trip_id = $1`,
+      [fixture.tripId],
+    )
+    expect(submitted).toEqual({
+      status: 'PENDING_CONFIRMATION',
+      actual_fare: 12000,
+      participant_count: 3,
+      final_share: 4000,
+      submitted_by: fixture.hostId,
+    })
+    expect(await queryRows(
+      `SELECT user_id FROM fare_confirmations WHERE trip_id = $1`,
+      [fixture.tripId],
+    )).toEqual([{ user_id: fixture.hostId }])
+    expect(await queryRows(
+      `SELECT user_id, deposit_amount, final_share
+       FROM trip_settlement_participants WHERE trip_id = $1 ORDER BY user_id`,
+      [fixture.tripId],
+    )).toEqual(expect.arrayContaining([
+      { user_id: fixture.hostId, deposit_amount: 5000, final_share: 4000 },
+      { user_id: fixture.memberId, deposit_amount: 5000, final_share: 4000 },
+      { user_id: fixture.noShowId, deposit_amount: 5000, final_share: 4000 },
+    ]))
+
+    for (const participant of [member, noShow]) {
+      await participant.page.goto(`/room/${fixture.tripId}/settle`)
+      const confirmFare = participant.page.getByRole('button', {
+        name: '실제 요금에 동의',
+      })
+      await expect(confirmFare).toHaveCount(1)
+      await confirmFare.click()
+      await expect(confirmFare).toHaveCount(0, { timeout: 30_000 })
+    }
+
+    expect(await queryRows(
+      `SELECT user_id FROM fare_confirmations WHERE trip_id = $1 ORDER BY user_id`,
+      [fixture.tripId],
+    )).toEqual([
+      fixture.hostId,
+      fixture.memberId,
+      fixture.noShowId,
+    ].sort().map((user_id) => ({ user_id })))
+
+    await host.page.goto(`/room/${fixture.tripId}/settle`)
+    const settleTrip = host.page.getByRole('button', { name: '최종 정산 실행' })
+    await expect(settleTrip).toHaveCount(1)
+    await settleTrip.click()
+    await expect(host.page).toHaveURL(
+      new RegExp(`/room/${fixture.tripId}/settle/complete`),
+      { timeout: 30_000 },
+    )
+    await expect(host.page.getByText('12,000P')).toBeVisible()
+    await expect(host.page.getByText('4,000P', { exact: true })).toBeVisible()
+
+    const [completed] = await queryRows<{
+      status: string
+      settlement_mode: string
+      settled_by_user_id: string
+    }>(
+      `SELECT status, settlement_mode, settled_by_user_id
+       FROM trip_settlements WHERE trip_id = $1`,
+      [fixture.tripId],
+    )
+    expect(completed).toEqual({
+      status: 'COMPLETED',
+      settlement_mode: 'HOST',
+      settled_by_user_id: fixture.hostId,
+    })
+    expect(await queryRows(
+      `SELECT status FROM trip_groups WHERE trip_id = $1`,
+      [fixture.tripId],
+    )).toEqual([{ status: 'COMPLETED' }])
+    expect(await queryRows(
+      `SELECT user_id, status FROM trip_participants WHERE trip_id = $1 ORDER BY user_id`,
+      [fixture.tripId],
+    )).toEqual([
+      fixture.hostId,
+      fixture.memberId,
+      fixture.noShowId,
+    ].sort().map((user_id) => ({ user_id, status: 'COMPLETED' })))
+    expect(await queryRows(
+      `SELECT user_id, entry_type, available_delta, held_delta
+       FROM point_ledger
+       WHERE trip_id = $1 AND entry_type IN ('SETTLEMENT_CHARGE', 'REFUND', 'ADDITIONAL_DEBIT')
+       ORDER BY user_id, entry_type`,
+      [fixture.tripId],
+    )).toEqual([
+      fixture.hostId,
+      fixture.memberId,
+      fixture.noShowId,
+    ].sort().flatMap((user_id) => [
+      { user_id, entry_type: 'REFUND', available_delta: 1000, held_delta: -1000 },
+      { user_id, entry_type: 'SETTLEMENT_CHARGE', available_delta: 0, held_delta: -4000 },
+    ]))
+    expect(await queryRows(
+      `SELECT user_id,
+              available_points::integer AS available_points,
+              held_points::integer AS held_points
+       FROM point_accounts WHERE user_id = ANY($1::uuid[]) ORDER BY user_id`,
+      [[fixture.hostId, fixture.memberId, fixture.noShowId]],
+    )).toEqual([
+      fixture.hostId,
+      fixture.memberId,
+      fixture.noShowId,
+    ].sort().map((user_id) => ({ user_id, available_points: 3500, held_points: 0 })))
   } finally {
     await host.context.close()
     await member.context.close()
+    await noShow.context.close()
   }
 })

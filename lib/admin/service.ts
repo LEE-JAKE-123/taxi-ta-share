@@ -35,7 +35,13 @@ export async function getAdminOperationsDashboard(actorId: string) {
           (SELECT count(*)::int FROM point_grant_requests
             WHERE status = 'PENDING') AS "pointRequests",
           (SELECT count(*)::int FROM trip_settlements
-            WHERE status = 'PENDING_CONFIRMATION') AS "pendingSettlements",
+            WHERE status = 'PENDING_CONFIRMATION'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM fare_disputes
+                WHERE fare_disputes.trip_id = trip_settlements.trip_id
+                  AND fare_disputes.status = 'OPEN'
+              )) AS "pendingSettlements",
           (SELECT count(*)::int FROM fare_disputes
             WHERE status = 'OPEN') AS "openDisputes"
       `,
@@ -193,7 +199,7 @@ export async function getAdminUsers(actorId: string) {
 
 export async function getAdminSafetyDashboard(actorId: string) {
   const sql = await requireAdminActor(actorId)
-  const [reports, tickets] = await Promise.all([
+  const [reports, tickets, counts] = await Promise.all([
     sql`
       SELECT
         r.report_id AS "reportId",
@@ -227,6 +233,13 @@ export async function getAdminSafetyDashboard(actorId: string) {
       ORDER BY t.created_at, t.ticket_id
       LIMIT 100
     `,
+    sql`
+      SELECT
+        (SELECT count(*)::int FROM user_reports
+          WHERE status IN ('SUBMITTED', 'IN_REVIEW')) AS "reportCount",
+        (SELECT count(*)::int FROM support_tickets
+          WHERE status IN ('SUBMITTED', 'IN_REVIEW')) AS "ticketCount"
+    `,
   ])
   return {
     reports: reports as unknown as Array<{
@@ -249,5 +262,14 @@ export async function getAdminSafetyDashboard(actorId: string) {
       status: string
       createdAt: string
     }>,
+    counts: (counts[0] as
+      | {
+          reportCount: number
+          ticketCount: number
+        }
+      | undefined) ?? {
+      reportCount: 0,
+      ticketCount: 0,
+    },
   }
 }

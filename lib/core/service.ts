@@ -327,11 +327,41 @@ export async function getTripJourney(userId: string, tripId: string) {
       sql`
         SELECT
           s.actual_fare AS "actualFare",
+          COALESCE((
+            SELECT adjustment.revised_actual_fare
+            FROM policy_v2_adjustment_commands adjustment
+            WHERE adjustment.trip_id = s.trip_id
+            ORDER BY adjustment.created_at DESC, adjustment.command_id DESC
+            LIMIT 1
+          ), s.actual_fare) AS "effectiveActualFare",
+          EXISTS (
+            SELECT 1
+            FROM policy_v2_adjustment_commands adjustment
+            WHERE adjustment.trip_id = s.trip_id
+          ) AS "hasFareAdjustment",
           s.final_share AS "finalShare",
           s.participant_count AS "participantCount",
           s.status,
+          s.allocation_policy AS "allocationPolicy",
           s.confirmation_deadline AS "confirmationDeadline",
           s.confirmation_deadline <= now() AS "confirmationExpired",
+          s.dispute_deadline AS "disputeDeadline",
+          (s.dispute_deadline IS NOT NULL AND s.dispute_deadline <= now())
+            AS "disputeExpired",
+          s.submitted_by = ${userId} AS "currentUserSubmittedFare",
+          COALESCE((
+            SELECT allocation.revised_share
+            FROM policy_v2_adjustment_commands adjustment
+            JOIN policy_v2_adjustment_allocations allocation
+              ON allocation.command_id = adjustment.command_id
+            WHERE adjustment.trip_id = s.trip_id AND allocation.user_id = ${userId}
+            ORDER BY adjustment.created_at DESC, adjustment.command_id DESC
+            LIMIT 1
+          ), (
+            SELECT sp.allocated_share
+            FROM trip_settlement_participants sp
+            WHERE sp.trip_id = s.trip_id AND sp.user_id = ${userId}
+          ), s.final_share) AS "currentUserFinalShare",
           count(c.user_id)::int AS "confirmationCount",
           bool_or(c.user_id = ${userId}) AS "currentUserConfirmed",
           EXISTS (
@@ -363,7 +393,8 @@ export async function getTripJourney(userId: string, tripId: string) {
         WHERE trip_id = ${tripId}
           AND user_id = ${userId}
           AND entry_type IN (
-            'DEPOSIT', 'SETTLEMENT_CHARGE', 'REFUND', 'ADDITIONAL_DEBIT'
+            'DEPOSIT', 'SETTLEMENT_CHARGE', 'REFUND', 'ADDITIONAL_DEBIT',
+            'FARE_ADJUSTMENT_REFUND', 'FARE_ADJUSTMENT_DEBIT'
           )
         ORDER BY created_at
       `,
@@ -399,11 +430,18 @@ export async function getTripJourney(userId: string, tripId: string) {
     settlement: settlementRows[0] as
       | {
           actualFare: number
+          effectiveActualFare: number
+          hasFareAdjustment: boolean
           finalShare: number
           participantCount: number
           status: string
+          allocationPolicy: string
           confirmationDeadline: string
           confirmationExpired: boolean
+          disputeDeadline: string | null
+          disputeExpired: boolean
+          currentUserSubmittedFare: boolean
+          currentUserFinalShare: number
           confirmationCount: number
           currentUserConfirmed: boolean
           currentUserHasOpenDispute: boolean
@@ -639,6 +677,641 @@ function positiveInteger(value: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_POINTS) {
     throw new CoreError(`${label}은 1~${MAX_POINTS.toLocaleString()} 사이의 정수여야 합니다.`)
   }
+}
+
+/**
+ * DEC-013 allocation is deliberately kept separate from the legacy ceil
+ * allocation. The returned snapshots are the values which must be persisted
+ * with a policy-v2 settlement; callers must not re-sort or re-calculate them.
+ */
+export type HostApprovalAllocationParticipant = {
+  userId: string
+  role: 'HOST' | 'PARTICIPANT'
+  approvedAt: Date | string | null
+}
+
+export type HostApprovalAllocation = HostApprovalAllocationParticipant & {
+  allocationRank: number
+  allocatedShare: number
+}
+
+export type PolicyV2ProvisionalAmounts = {
+  chargedFromDeposit: number
+  refund: number
+  additionalDebit: number
+  debtIncurred: number
+}
+
+/**
+ * DEC-014: use every available point before recording the remainder as debt.
+ * The worker obtains the available balance under a row lock before calling
+ * this helper; it must never use a client-supplied balance.
+ */
+export function calculatePolicyV2ProvisionalAmounts(input: {
+  depositAmount: number
+  allocatedShare: number
+  availablePoints: number
+}): PolicyV2ProvisionalAmounts {
+  const values = [input.depositAmount, input.allocatedShare, input.availablePoints]
+  if (
+    values.some((value) => !Number.isSafeInteger(value) || value < 0) ||
+    input.depositAmount > MAX_POINTS || input.allocatedShare > MAX_POINTS
+  ) {
+    throw new CoreError('정산 포인트 금액이 올바르지 않습니다.')
+  }
+  const chargedFromDeposit = Math.min(input.depositAmount, input.allocatedShare)
+  const refund = Math.max(0, input.depositAmount - input.allocatedShare)
+  const shortfall = Math.max(0, input.allocatedShare - input.depositAmount)
+  const additionalDebit = Math.min(input.availablePoints, shortfall)
+  return {
+    chargedFromDeposit,
+    refund,
+    additionalDebit,
+    debtIncurred: shortfall - additionalDebit,
+  }
+}
+
+export type PolicyV2AdjustmentAmounts = {
+  availableDebit: number
+  debtIncrease: number
+  debtReduction: number
+  availableRefund: number
+}
+
+/**
+ * A corrected fare compensates only the difference from the immutable
+ * provisional allocation.  Refunds retire this trip's outstanding debt first
+ * so a user can never keep spendable points while the same overcharge remains
+ * recorded as debt.
+ */
+export function calculatePolicyV2AdjustmentAmounts(input: {
+  previousShare: number
+  revisedShare: number
+  availablePoints: number
+  outstandingDebt: number
+}): PolicyV2AdjustmentAmounts {
+  const values = [
+    input.previousShare,
+    input.revisedShare,
+    input.availablePoints,
+    input.outstandingDebt,
+  ]
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    throw new CoreError('보정 정산 금액이 올바르지 않습니다.')
+  }
+  const difference = input.revisedShare - input.previousShare
+  if (difference >= 0) {
+    const availableDebit = Math.min(input.availablePoints, difference)
+    return {
+      availableDebit,
+      debtIncrease: difference - availableDebit,
+      debtReduction: 0,
+      availableRefund: 0,
+    }
+  }
+  const refund = -difference
+  const debtReduction = Math.min(input.outstandingDebt, refund)
+  return {
+    availableDebit: 0,
+    debtIncrease: 0,
+    debtReduction,
+    availableRefund: refund - debtReduction,
+  }
+}
+
+function approvedAtMillis(value: Date | string | null) {
+  if (value === null) return Number.POSITIVE_INFINITY
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime()
+  if (!Number.isFinite(time)) {
+    throw new CoreError('참여 승인 시각이 올바르지 않습니다.')
+  }
+  return time
+}
+
+export function allocateHostApprovalOrder(
+  actualFare: number,
+  participants: readonly HostApprovalAllocationParticipant[],
+): HostApprovalAllocation[] {
+  positiveInteger(actualFare, '실제 요금')
+  if (participants.length < 2 || participants.length > 4) {
+    throw new CoreError('정산 대상 인원은 2~4명이어야 합니다.')
+  }
+
+  const userIds = new Set<string>()
+  let hostCount = 0
+  for (const participant of participants) {
+    if (!participant.userId || userIds.has(participant.userId)) {
+      throw new CoreError('정산 대상 참여자가 올바르지 않습니다.')
+    }
+    userIds.add(participant.userId)
+    if (participant.role === 'HOST') hostCount += 1
+    else if (participant.role !== 'PARTICIPANT') {
+      throw new CoreError('정산 대상 역할이 올바르지 않습니다.')
+    }
+    approvedAtMillis(participant.approvedAt)
+  }
+  if (hostCount !== 1) {
+    throw new CoreError('정산 대상에는 방장이 정확히 한 명 있어야 합니다.')
+  }
+
+  const ordered = [...participants].sort((left, right) => {
+    if (left.role !== right.role) return left.role === 'HOST' ? -1 : 1
+    const approvalDifference = approvedAtMillis(left.approvedAt) - approvedAtMillis(right.approvedAt)
+    return approvalDifference || left.userId.localeCompare(right.userId)
+  })
+  const baseShare = Math.floor(actualFare / ordered.length)
+  const higherShareStartsAt = ordered.length - (actualFare % ordered.length)
+
+  return ordered.map((participant, index) => ({
+    ...participant,
+    allocationRank: index + 1,
+    allocatedShare: baseShare + (index + 1 > higherShareStartsAt ? 1 : 0),
+  }))
+}
+
+export type PolicyV2UsageEligibility = {
+  eligible: boolean
+  reason: 'ELIGIBLE' | 'OPEN_DISPUTE_LIMIT' | 'UNCONTESTED_DEBT'
+  openDisputeCount: number
+  uncontestedDebtCount: number
+  contestedDebtCount: number
+}
+
+/** Pure DEC-014 decision rule; query code only supplies the audited counts. */
+export function policyV2UsageEligibilityFromCounts(input: {
+  openDisputeCount: number
+  uncontestedDebtCount: number
+  contestedDebtCount: number
+}): PolicyV2UsageEligibility {
+  const counts = [
+    input.openDisputeCount,
+    input.uncontestedDebtCount,
+    input.contestedDebtCount,
+  ]
+  if (counts.some((count) => !Number.isSafeInteger(count) || count < 0)) {
+    throw new CoreError('이용 제한 판정 값이 올바르지 않습니다.')
+  }
+  if (input.openDisputeCount >= 3) {
+    return { ...input, eligible: false, reason: 'OPEN_DISPUTE_LIMIT' }
+  }
+  if (input.uncontestedDebtCount > 0) {
+    return { ...input, eligible: false, reason: 'UNCONTESTED_DEBT' }
+  }
+  return { ...input, eligible: true, reason: 'ELIGIBLE' }
+}
+
+/**
+ * Reads only policy-v2 data. An OPEN dispute is linked to a debt only when it
+ * is from the same user, trip, and fare revision, preventing another user's
+ * dispute from bypassing the debtor's normal-use restriction.
+ */
+export async function getPolicyV2UsageEligibility(
+  userId: string,
+): Promise<PolicyV2UsageEligibility> {
+  if (!isPointRequestUuid(userId)) {
+    throw new CoreError('사용자 식별자가 올바르지 않습니다.')
+  }
+  await ensureDatabaseIdentity()
+  const sql = getDatabase()
+  const rows = await sql`
+    WITH open_debts AS (
+      SELECT
+        d.debt_id,
+        EXISTS (
+          SELECT 1
+          FROM fare_disputes dispute
+          WHERE dispute.trip_id = d.trip_id
+            AND dispute.user_id = d.user_id
+            AND dispute.fare_revision = d.fare_revision
+            AND dispute.status = 'OPEN'
+        ) AS is_contested
+      FROM point_debt_obligations d
+      WHERE d.user_id = ${userId}
+        AND d.status = 'OPEN'
+    ), open_disputes AS (
+      SELECT count(*)::int AS count
+      FROM fare_disputes
+      WHERE user_id = ${userId}
+        AND status = 'OPEN'
+    )
+    SELECT
+      (SELECT count FROM open_disputes) AS "openDisputeCount",
+      count(*) FILTER (WHERE NOT is_contested)::int AS "uncontestedDebtCount",
+      count(*) FILTER (WHERE is_contested)::int AS "contestedDebtCount"
+    FROM open_debts
+  `
+  const row = rows[0] as
+    | { openDisputeCount: number; uncontestedDebtCount: number; contestedDebtCount: number }
+    | undefined
+  return policyV2UsageEligibilityFromCounts({
+    openDisputeCount: Number(row?.openDisputeCount ?? 0),
+    uncontestedDebtCount: Number(row?.uncontestedDebtCount ?? 0),
+    contestedDebtCount: Number(row?.contestedDebtCount ?? 0),
+  })
+}
+
+export async function assertPolicyV2UsageEligible(userId: string) {
+  const eligibility = await getPolicyV2UsageEligibility(userId)
+  if (!eligibility.eligible) {
+    throw new CoreError(
+      eligibility.reason === 'OPEN_DISPUTE_LIMIT'
+        ? '미해결 이의가 3건 이상이면 정상 이용을 할 수 없습니다.'
+        : '미상환 외상이 있어 정상 이용을 할 수 없습니다.',
+    )
+  }
+  return eligibility
+}
+
+type PolicyV2ProvisionalPrerequisites = {
+  schemaReady: boolean
+  transitionGuardReady: boolean
+  reversibleLedgerReady: boolean
+}
+
+/**
+ * 0022 supplies the schema, but it intentionally leaves the legacy settlement
+ * and ledger guards in place. Before any v2 write we require replacement
+ * guards which explicitly support provisional/reversal entries. This makes a
+ * partially deployed migration fail before it can write an irreversible row.
+ */
+async function getPolicyV2ProvisionalPrerequisites(
+  client: PoolClient,
+): Promise<PolicyV2ProvisionalPrerequisites> {
+  const result = await client.query(
+    `SELECT
+       to_regclass('public.point_debt_obligations') IS NOT NULL
+         AND to_regclass('public.point_debt_events') IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM pg_attribute
+           WHERE attrelid = 'trip_settlements'::regclass
+             AND attname IN ('agreement_deadline', 'dispute_deadline', 'provisionally_settled_at', 'allocation_policy')
+             AND NOT attisdropped
+           GROUP BY attrelid HAVING count(*) = 4
+         ) AS "schemaReady",
+       EXISTS (
+         SELECT 1 FROM pg_proc
+         WHERE proname = 'guard_trip_settlement_update'
+           AND pg_get_functiondef(oid) LIKE '%PROVISIONALLY_SETTLED%'
+       ) AS "transitionGuardReady",
+       EXISTS (
+         SELECT 1
+         FROM pg_trigger
+         WHERE tgrelid = 'point_ledger'::regclass
+           AND tgname = 'point_ledger_validate_policy_v2_financials'
+           AND NOT tgisinternal
+       )
+       AND EXISTS (
+         SELECT 1
+         FROM pg_trigger
+         WHERE tgrelid = 'system_deadline_commands'::regclass
+           AND tgname = 'system_deadline_commands_validate_policy_v2_linkage'
+           AND NOT tgisinternal
+       ) AS "reversibleLedgerReady"`,
+  )
+  const row = result.rows[0] as PolicyV2ProvisionalPrerequisites | undefined
+  return {
+    schemaReady: Boolean(row?.schemaReady),
+    transitionGuardReady: Boolean(row?.transitionGuardReady),
+    reversibleLedgerReady: Boolean(row?.reversibleLedgerReady),
+  }
+}
+
+export async function provisionallySettleTripV2(input: {
+  tripId: string
+  idempotencyKey: string
+}) {
+  if (!isPointRequestUuid(input.tripId) || !isPointRequestUuid(input.idempotencyKey)) {
+    throw new CoreError('잠정 정산 요청 식별자가 올바르지 않습니다.')
+  }
+
+  return inTransaction(async (client) => {
+    const prerequisites = await getPolicyV2ProvisionalPrerequisites(client)
+    if (
+      !prerequisites.schemaReady ||
+      !prerequisites.transitionGuardReady ||
+      !prerequisites.reversibleLedgerReady
+    ) {
+      throw new CoreError(
+        '잠정 정산 정책 데이터베이스 준비가 완료되지 않았습니다. 원장 또는 상태를 변경하지 않았습니다.',
+      )
+    }
+
+    const trip = await client.query(
+      `SELECT g.status AS trip_status,
+              s.status AS settlement_status,
+              s.allocation_policy,
+              s.participant_count,
+              s.actual_fare,
+              s.fare_revision,
+              s.resubmission_required,
+              s.agreement_deadline <= now() AS agreement_due,
+              s.provisional_deadline_command_id
+       FROM trip_groups g
+       JOIN trip_settlements s ON s.trip_id = g.trip_id
+       WHERE g.trip_id = $1
+       FOR UPDATE OF g, s`,
+      [input.tripId],
+    )
+    const settlement = trip.rows[0] as Record<string, unknown> | undefined
+    if (!settlement || settlement.allocation_policy !== 'HOST_APPROVAL_ORDER') {
+      return 'SKIPPED' as const
+    }
+    if (settlement.settlement_status === 'PROVISIONALLY_SETTLED') {
+      const command = await client.query(
+        `SELECT 1 FROM system_deadline_commands
+         WHERE command_id = $1 AND trip_id = $2 AND fare_revision = $3
+           AND command_type = 'PROVISIONAL_SETTLE'
+         FOR SHARE`,
+        [
+          settlement.provisional_deadline_command_id,
+          input.tripId,
+          settlement.fare_revision,
+        ],
+      )
+      if (!command.rowCount) {
+        throw new CoreError('잠정 정산 명령의 감사 연결이 손상되었습니다.')
+      }
+      return 'SETTLED' as const
+    }
+    if (
+      settlement.trip_status !== 'SETTLEMENT_PENDING' ||
+      settlement.settlement_status !== 'PENDING_CONFIRMATION' ||
+      settlement.resubmission_required
+    ) {
+      return 'SKIPPED' as const
+    }
+
+    const snapshots = await client.query(
+      `SELECT sp.user_id, sp.deposit_amount, sp.allocation_rank, sp.allocated_share,
+              p.role, p.status, p.approved_at,
+              c.user_id IS NOT NULL AS confirmed
+       FROM trip_settlement_participants sp
+       JOIN trip_participants p
+         ON p.trip_id = sp.trip_id AND p.user_id = sp.user_id
+       JOIN trip_deposits d
+         ON d.trip_id = sp.trip_id AND d.user_id = sp.user_id
+       LEFT JOIN fare_confirmations c
+         ON c.trip_id = sp.trip_id AND c.user_id = sp.user_id
+       WHERE sp.trip_id = $1
+         AND sp.deposit_amount = d.amount
+       ORDER BY sp.user_id
+       FOR UPDATE OF sp, p, d`,
+      [input.tripId],
+    )
+    const participantCount = Number(settlement.participant_count)
+    if (snapshots.rowCount !== participantCount || participantCount < 2 || participantCount > 4) {
+      throw new CoreError('정산 참여자 스냅샷이 확정 예치 인원과 일치하지 않습니다.')
+    }
+    if (
+      snapshots.rows.some(
+        (row) =>
+          !['HOST', 'MEMBER'].includes(String(row.role)) ||
+          !['DEPOSITED', 'CHECKED_IN', 'NO_SHOW'].includes(String(row.status)) ||
+          !Number.isSafeInteger(Number(row.allocation_rank)) ||
+          !Number.isSafeInteger(Number(row.allocated_share)),
+      )
+    ) {
+      throw new CoreError('잠정 정산에 필요한 확정 참여자 정보가 올바르지 않습니다.')
+    }
+    const allocation = snapshots.rows
+      .map((row) => ({
+        userId: String(row.user_id),
+        role: row.role === 'HOST' ? 'HOST' as const : 'PARTICIPANT' as const,
+        approvedAt: row.approved_at as Date | string | null,
+      }))
+    const expectedAllocation = allocateHostApprovalOrder(Number(settlement.actual_fare), allocation)
+    const snapshotByUser = new Map(snapshots.rows.map((row) => [String(row.user_id), row]))
+    if (
+      expectedAllocation.some((expected) => {
+        const snapshot = snapshotByUser.get(expected.userId)
+        return !snapshot || Number(snapshot.allocation_rank) !== expected.allocationRank ||
+          Number(snapshot.allocated_share) !== expected.allocatedShare
+      })
+    ) {
+      throw new CoreError('정산 배분 스냅샷이 방장·승인 순서 정책과 일치하지 않습니다.')
+    }
+    const allConfirmed = snapshots.rows.every((row) => row.confirmed === true)
+    if (!allConfirmed && settlement.agreement_due !== true) return 'SKIPPED' as const
+
+    const disputes = await client.query(
+      `SELECT dispute_id FROM fare_disputes
+       WHERE trip_id = $1 AND fare_revision = $2 AND status = 'OPEN'
+       FOR UPDATE`,
+      [input.tripId, settlement.fare_revision],
+    )
+    if (disputes.rowCount) return 'SKIPPED' as const
+
+    const userIds = snapshots.rows.map((row) => String(row.user_id))
+    const balances = await client.query(
+      `SELECT user_id, available_points, held_points
+       FROM point_accounts
+       WHERE user_id = ANY($1::uuid[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      [userIds],
+    )
+    if (balances.rowCount !== participantCount) {
+      throw new CoreError('잠정 정산 참여자의 포인트 계정을 찾을 수 없습니다.')
+    }
+    const balanceByUser = new Map(
+      balances.rows.map((row) => [String(row.user_id), {
+        available: Number(row.available_points),
+        held: Number(row.held_points),
+      }]),
+    )
+    for (const snapshot of snapshots.rows) {
+      const balance = balanceByUser.get(String(snapshot.user_id))
+      if (!balance || balance.held < Number(snapshot.deposit_amount)) {
+        throw new CoreError('예치 포인트 잔액이 정산 스냅샷과 일치하지 않습니다.')
+      }
+    }
+
+    const executionKey = `provisional:${input.tripId}:revision:${settlement.fare_revision}`
+    const command = await client.query(
+      `INSERT INTO system_deadline_commands (
+         trip_id, fare_revision, command_type, execution_key
+       ) VALUES ($1, $2, 'PROVISIONAL_SETTLE', $3)
+       ON CONFLICT (trip_id, fare_revision, command_type) DO NOTHING
+       RETURNING command_id`,
+      [input.tripId, settlement.fare_revision, executionKey],
+    )
+    const commandId = command.rows[0]?.command_id as string | undefined
+    if (!commandId) {
+      // A command without the transition must never be silently reused: it
+      // would conceal a partial historical write and make recovery ambiguous.
+      throw new CoreError('이미 생성된 잠정 정산 명령을 안전하게 재사용할 수 없습니다.')
+    }
+
+    await client.query(
+      `UPDATE trip_settlements
+       SET status = 'PROVISIONALLY_SETTLED',
+           settlement_mode = 'SYSTEM_PROVISIONAL',
+           provisional_deadline_command_id = $2
+       WHERE trip_id = $1 AND status = 'PENDING_CONFIRMATION'`,
+      [input.tripId, commandId],
+    )
+
+    for (const snapshot of snapshots.rows) {
+      const userId = String(snapshot.user_id)
+      const amounts = calculatePolicyV2ProvisionalAmounts({
+        depositAmount: Number(snapshot.deposit_amount),
+        allocatedShare: Number(snapshot.allocated_share),
+        availablePoints: balanceByUser.get(userId)!.available,
+      })
+      if (amounts.chargedFromDeposit > 0) {
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, system_deadline_command_id, reason, idempotency_key
+           ) VALUES ($1, 'SETTLEMENT_CHARGE', 0, $2, $3, NULL, $4,
+             'policy-v2 provisional settlement charge', $5)`,
+          [userId, -amounts.chargedFromDeposit, input.tripId, commandId,
+            `provisional:${input.tripId}:revision:${settlement.fare_revision}:charge:${userId}`],
+        )
+      }
+      if (amounts.refund > 0) {
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, system_deadline_command_id, reason, idempotency_key
+           ) VALUES ($1, 'REFUND', $2, $3, $4, NULL, $5,
+             'policy-v2 provisional settlement refund', $6)`,
+          [userId, amounts.refund, -amounts.refund, input.tripId, commandId,
+            `provisional:${input.tripId}:revision:${settlement.fare_revision}:refund:${userId}`],
+        )
+      }
+      if (amounts.additionalDebit > 0) {
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, system_deadline_command_id, reason, idempotency_key
+           ) VALUES ($1, 'ADDITIONAL_DEBIT', $2, 0, $3, NULL, $4,
+             'policy-v2 provisional settlement additional debit', $5)`,
+          [userId, -amounts.additionalDebit, input.tripId, commandId,
+            `provisional:${input.tripId}:revision:${settlement.fare_revision}:debit:${userId}`],
+        )
+      }
+      if (amounts.debtIncurred > 0) {
+        const obligation = await client.query(
+          `INSERT INTO point_debt_obligations (user_id, trip_id, fare_revision)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (trip_id, user_id, fare_revision) DO NOTHING
+           RETURNING debt_id`,
+          [userId, input.tripId, settlement.fare_revision],
+        )
+        const debtId = obligation.rows[0]?.debt_id as string | undefined
+        if (!debtId) {
+          throw new CoreError('기존 외상 의무가 있어 잠정 정산을 안전하게 실행할 수 없습니다.')
+        }
+        await client.query(
+          `INSERT INTO point_debt_events (
+             debt_id, user_id, event_type, debt_delta, actor_user_id, reason,
+             idempotency_key, system_deadline_command_id
+           ) VALUES ($1, $2, 'INCUR', $3, NULL, 'policy-v2 provisional settlement debt', $4, $5)`,
+          [debtId, userId, amounts.debtIncurred,
+            `provisional:${input.tripId}:revision:${settlement.fare_revision}:debt-incur:${userId}`,
+            commandId],
+        )
+      }
+    }
+    return 'SETTLED' as const
+  })
+}
+
+export async function finalizePolicyV2Settlement(input: {
+  tripId: string
+  idempotencyKey: string
+}) {
+  if (!isPointRequestUuid(input.tripId) || !isPointRequestUuid(input.idempotencyKey)) {
+    throw new CoreError('최종 정산 요청 식별자가 올바르지 않습니다.')
+  }
+  return inTransaction(async (client) => {
+    const settlement = await client.query(
+      `SELECT g.status AS trip_status, s.status AS settlement_status,
+              s.allocation_policy, s.fare_revision, s.dispute_deadline,
+              s.provisional_deadline_command_id, s.finalization_deadline_command_id,
+              s.participant_count
+       FROM trip_groups g
+       JOIN trip_settlements s ON s.trip_id = g.trip_id
+       WHERE g.trip_id = $1
+       FOR UPDATE OF g, s`,
+      [input.tripId],
+    )
+    const row = settlement.rows[0]
+    if (!row || row.trip_status !== 'SETTLEMENT_PENDING' ||
+      row.allocation_policy !== 'HOST_APPROVAL_ORDER') {
+      return 'SKIPPED' as const
+    }
+    if (row.settlement_status === 'COMPLETED') return 'SETTLED' as const
+    if (row.settlement_status !== 'PROVISIONALLY_SETTLED' ||
+      new Date(row.dispute_deadline).getTime() > Date.now()) {
+      return 'SKIPPED' as const
+    }
+    const disputes = await client.query(
+      `SELECT d.status, c.command_id
+       FROM fare_disputes d
+       LEFT JOIN policy_v2_adjustment_commands c ON c.dispute_id = d.dispute_id
+       WHERE d.trip_id = $1 AND d.fare_revision = $2
+       FOR UPDATE OF d`,
+      [input.tripId, row.fare_revision],
+    )
+    const openDisputeCount = disputes.rows.filter((dispute) => dispute.status === 'OPEN').length
+    const resolvedDisputes = disputes.rows.filter((dispute) => dispute.status === 'RESOLVED')
+    if (openDisputeCount > 0 || resolvedDisputes.some((dispute) => !dispute.command_id)) {
+      return 'SKIPPED' as const
+    }
+
+    const existingCommand = await client.query(
+      `SELECT command_id FROM system_deadline_commands
+       WHERE trip_id = $1 AND fare_revision = $2 AND command_type = 'FINALIZE_SETTLEMENT'
+       FOR UPDATE`,
+      [input.tripId, row.fare_revision],
+    )
+    if (existingCommand.rowCount) {
+      throw new CoreError('기존 최종 정산 명령이 있어 안전하게 재실행할 수 없습니다.')
+    }
+    const executionKey = `finalize:${input.tripId}:revision:${row.fare_revision}`
+    const command = await client.query(
+      `INSERT INTO system_deadline_commands (
+         trip_id, fare_revision, command_type, execution_key
+       ) VALUES ($1, $2, 'FINALIZE_SETTLEMENT', $3)
+       RETURNING command_id`,
+      [input.tripId, row.fare_revision, executionKey],
+    )
+    const commandId = String(command.rows[0]?.command_id ?? '')
+    if (!commandId) throw new CoreError('최종 정산 명령을 만들지 못했습니다.')
+    const participants = await client.query(
+      `SELECT user_id FROM trip_settlement_participants
+       WHERE trip_id = $1
+       ORDER BY user_id
+       FOR UPDATE`,
+      [input.tripId],
+    )
+    if (participants.rowCount !== Number(row.participant_count)) {
+      throw new CoreError('최종 정산 참여자 스냅샷이 일치하지 않습니다.')
+    }
+    await client.query(
+      `UPDATE trip_participants SET status = 'COMPLETED', completed_at = now()
+       WHERE trip_id = $1 AND user_id = ANY($2::uuid[])
+         AND status IN ('DEPOSITED', 'CHECKED_IN', 'NO_SHOW')`,
+      [input.tripId, participants.rows.map((participant) => participant.user_id)],
+    )
+    await client.query(
+      `UPDATE trip_settlements
+       SET status = 'COMPLETED', settlement_idempotency_key = $2,
+           settled_at = now(), settled_by_user_id = NULL,
+           settlement_mode = 'SYSTEM_FINALIZE',
+           finalization_deadline_command_id = $3
+       WHERE trip_id = $1 AND status = 'PROVISIONALLY_SETTLED'`,
+      [input.tripId, input.idempotencyKey, commandId],
+    )
+    await client.query(
+      `UPDATE trip_groups SET status = 'COMPLETED', updated_at = now()
+       WHERE trip_id = $1`,
+      [input.tripId],
+    )
+    return 'SETTLED' as const
+  })
 }
 
 export async function createTrip(input: {
@@ -1407,6 +2080,137 @@ export async function confirmTripAndDeposit(
   })
 }
 
+export type OpenPointDebtForRepayment = {
+  debtId: string
+  tripId: string
+  outstandingPoints: number
+}
+
+export type PlannedDebtRepayment = {
+  debtId: string
+  tripId: string
+  amount: number
+}
+
+/**
+ * Allocates an already-approved virtual point grant to debts in the same order
+ * as the database lock/query: oldest obligation first, then debt ID.
+ */
+export function allocateOldestDebtRepayment(
+  amount: number,
+  debts: readonly OpenPointDebtForRepayment[],
+) {
+  if (!Number.isSafeInteger(amount) || amount < 1) {
+    throw new CoreError('외상 상환에 사용할 포인트는 양의 정수여야 합니다.')
+  }
+
+  let remainingPoints = amount
+  const repayments: PlannedDebtRepayment[] = []
+  for (const debt of debts) {
+    if (
+      !debt.debtId ||
+      !debt.tripId ||
+      !Number.isSafeInteger(debt.outstandingPoints) ||
+      debt.outstandingPoints < 1
+    ) {
+      throw new CoreError('상환할 외상 정보가 올바르지 않습니다.')
+    }
+    if (remainingPoints === 0) break
+
+    const repayment = Math.min(remainingPoints, debt.outstandingPoints)
+    repayments.push({
+      debtId: debt.debtId,
+      tripId: debt.tripId,
+      amount: repayment,
+    })
+    remainingPoints -= repayment
+  }
+
+  return { repayments, remainingPoints }
+}
+
+async function lockOpenPointDebtsForRepayment(client: PoolClient, userId: string) {
+  const account = await client.query(
+    `SELECT user_id
+     FROM point_accounts
+     WHERE user_id = $1
+     FOR UPDATE`,
+    [userId],
+  )
+  if (!account.rowCount) {
+    throw new CoreError('지급 대상의 포인트 계정을 찾을 수 없습니다.')
+  }
+
+  const debts = await client.query(
+    `SELECT
+       debt_id AS "debtId",
+       trip_id AS "tripId",
+       outstanding_points AS "outstandingPoints"
+     FROM point_debt_obligations
+     WHERE user_id = $1 AND status = 'OPEN'
+     ORDER BY created_at ASC, debt_id ASC
+     FOR UPDATE`,
+    [userId],
+  )
+  return debts.rows.map((debt) => ({
+    debtId: debt.debtId as string,
+    tripId: debt.tripId as string,
+    outstandingPoints: Number(debt.outstandingPoints),
+  })) satisfies OpenPointDebtForRepayment[]
+}
+
+async function repayOpenPointDebtsFromGrant(
+  client: PoolClient,
+  input: {
+    userId: string
+    adminId: string
+    amount: number
+    reason: string
+    grantIdempotencyKey: string
+    lockedDebts: readonly OpenPointDebtForRepayment[]
+  },
+) {
+  const plan = allocateOldestDebtRepayment(input.amount, input.lockedDebts)
+  for (const repayment of plan.repayments) {
+    const repaymentReason = `관리자 지급 외상 상환: ${input.reason}`
+    const ledger = await client.query(
+      `INSERT INTO point_ledger (
+         user_id, entry_type, available_delta, held_delta, trip_id,
+         actor_user_id, reason, idempotency_key
+       ) VALUES ($1, 'DEBT_REPAYMENT', $2, 0, $3, $4, $5, $6)
+       RETURNING ledger_id`,
+      [
+        input.userId,
+        -repayment.amount,
+        repayment.tripId,
+        input.adminId,
+        repaymentReason,
+        `${input.grantIdempotencyKey}:debt-ledger:${repayment.debtId}`,
+      ],
+    )
+    const repaymentLedgerId = ledger.rows[0]?.ledger_id as string | undefined
+    if (!repaymentLedgerId) {
+      throw new CoreError('외상 상환 원장을 기록하지 못했습니다.')
+    }
+    await client.query(
+      `INSERT INTO point_debt_events (
+         debt_id, user_id, event_type, debt_delta, actor_user_id, reason,
+         idempotency_key, repayment_ledger_id
+       ) VALUES ($1, $2, 'REPAYMENT', $3, $4, $5, $6, $7)`,
+      [
+        repayment.debtId,
+        input.userId,
+        -repayment.amount,
+        input.adminId,
+        repaymentReason,
+        `${input.grantIdempotencyKey}:debt-event:${repayment.debtId}`,
+        repaymentLedgerId,
+      ],
+    )
+  }
+  return plan
+}
+
 export async function grantPoints(input: {
   adminId: string
   targetUserId: string
@@ -1454,6 +2258,10 @@ export async function grantPoints(input: {
     }
 
     const ledgerKey = `grant:${input.adminId}:${input.idempotencyKey}`
+    const lockedDebts = await lockOpenPointDebtsForRepayment(
+      client,
+      input.targetUserId,
+    )
     const inserted = await client.query(
       `INSERT INTO point_ledger (
          user_id, entry_type, available_delta, held_delta, actor_user_id,
@@ -1463,7 +2271,17 @@ export async function grantPoints(input: {
        RETURNING ledger_id`,
       [input.targetUserId, amount, input.adminId, reason, ledgerKey],
     )
-    if (inserted.rowCount) return inserted.rows[0].ledger_id as string
+    if (inserted.rowCount) {
+      await repayOpenPointDebtsFromGrant(client, {
+        userId: input.targetUserId,
+        adminId: input.adminId,
+        amount,
+        reason,
+        grantIdempotencyKey: ledgerKey,
+        lockedDebts,
+      })
+      return inserted.rows[0].ledger_id as string
+    }
 
     const existing = await client.query(
       `SELECT
@@ -1622,6 +2440,12 @@ export async function fulfillPointRequest(input: {
       throw new CoreError('활성 일반 사용자의 요청만 처리할 수 있습니다.')
     }
 
+    const requestedAmount = Number(row.requested_amount)
+    const lockedDebts = await lockOpenPointDebtsForRepayment(
+      client,
+      row.requester_user_id as string,
+    )
+    const ledgerKey = `point-request:${input.requestId}`
     const ledger = await client.query(
       `INSERT INTO point_ledger (
          user_id, entry_type, available_delta, held_delta, actor_user_id,
@@ -1631,14 +2455,24 @@ export async function fulfillPointRequest(input: {
        RETURNING ledger_id`,
       [
         row.requester_user_id,
-        row.requested_amount,
+        requestedAmount,
         input.adminId,
         row.reason,
-        `point-request:${input.requestId}`,
+        ledgerKey,
         input.requestId,
       ],
     )
     let ledgerId = ledger.rows[0]?.ledger_id as string | undefined
+    if (ledgerId) {
+      await repayOpenPointDebtsFromGrant(client, {
+        userId: row.requester_user_id as string,
+        adminId: input.adminId,
+        amount: requestedAmount,
+        reason: row.reason as string,
+        grantIdempotencyKey: ledgerKey,
+        lockedDebts,
+      })
+    }
     if (!ledgerId) {
       const existing = await client.query(
         `SELECT ledger_id
@@ -1651,10 +2485,10 @@ export async function fulfillPointRequest(input: {
            AND actor_user_id = $5
            AND reason = $6`,
         [
-          `point-request:${input.requestId}`,
+          ledgerKey,
           input.requestId,
           row.requester_user_id,
-          row.requested_amount,
+          requestedAmount,
           input.adminId,
           row.reason,
         ],
@@ -1918,7 +2752,7 @@ export async function submitActualFare(input: {
     }
     const replay = await client.query(
       `SELECT actual_fare, submitted_by, fare_submission_idempotency_key,
-              resubmission_required
+              resubmission_required, allocation_policy
        FROM trip_settlements
        WHERE trip_id = $1
        FOR UPDATE`,
@@ -1938,6 +2772,9 @@ export async function submitActualFare(input: {
       if (!existing.resubmission_required) {
         throw new CoreError('이미 실제 요금이 등록되었습니다.')
       }
+      if (existing.allocation_policy === 'HOST_APPROVAL_ORDER') {
+        throw new CoreError('정책 v2 실제 요금은 잠정 정산 전에 다시 제출할 수 없습니다.')
+      }
       if (row.host_user_id !== input.actorId) {
         throw new CoreError('수정 실제 요금은 방장만 다시 제출할 수 있습니다.')
       }
@@ -1945,7 +2782,7 @@ export async function submitActualFare(input: {
     }
     if (row.status !== 'IN_PROGRESS') throw new CoreError('이동 시작 후 실제 요금을 입력할 수 있습니다.')
     const cohort = await client.query(
-      `SELECT p.user_id, p.role, p.status, d.amount
+      `SELECT p.user_id, p.role, p.status, p.approved_at, d.amount
        FROM trip_participants p
        JOIN trip_deposits d
          ON d.trip_id = p.trip_id
@@ -1968,7 +2805,7 @@ export async function submitActualFare(input: {
     ) {
       throw new CoreError('모든 참여자를 체크인 또는 노쇼로 확정한 뒤 실제 요금을 제출해 주세요.')
     }
-    calculateDemoFinalShare(input.actualFare, participantCount)
+    const legacyFinalShare = calculateDemoFinalShare(input.actualFare, participantCount)
     if (isResubmission) {
       await client.query(
         `DELETE FROM fare_confirmations WHERE trip_id = $1`,
@@ -1994,28 +2831,55 @@ export async function submitActualFare(input: {
       await client.query(
         `INSERT INTO trip_settlements (
            trip_id, actual_fare, participant_count, final_share, submitted_by,
-           fare_submission_idempotency_key, confirmation_deadline, cohort_basis
+           fare_submission_idempotency_key, confirmation_deadline, agreement_deadline,
+           dispute_deadline, cohort_basis, allocation_policy
          ) VALUES (
            $1, $2::integer, $3::smallint,
            ceil($2::integer::numeric / $3::smallint::numeric)::integer,
-           $4, $5, now() + interval '24 hours', 'ESCROW_CONFIRMED'
+           $4, $5, now() + interval '10 minutes', now() + interval '10 minutes',
+           now() + interval '24 hours', 'ESCROW_CONFIRMED', 'HOST_APPROVAL_ORDER'
          )`,
         [input.tripId, input.actualFare, participantCount, input.actorId, input.idempotencyKey],
       )
     }
-    for (const participant of cohort.rows) {
-      await client.query(
-        `INSERT INTO trip_settlement_participants (
-           trip_id, user_id, deposit_amount, final_share
-         ) VALUES ($1, $2, $3, ceil($4::numeric / $5)::integer)`,
-        [
-          input.tripId,
-          participant.user_id,
-          participant.amount,
-          input.actualFare,
-          participantCount,
-        ],
+    if (isResubmission) {
+      for (const participant of cohort.rows) {
+        await client.query(
+          `INSERT INTO trip_settlement_participants (
+             trip_id, user_id, deposit_amount, final_share
+           ) VALUES ($1, $2, $3, $4)`,
+          [input.tripId, participant.user_id, participant.amount, legacyFinalShare],
+        )
+      }
+    } else {
+      const allocations = allocateHostApprovalOrder(
+        input.actualFare,
+        cohort.rows.map((participant) => ({
+          userId: String(participant.user_id),
+          role: participant.role === 'HOST' ? 'HOST' as const : 'PARTICIPANT' as const,
+          approvedAt: participant.approved_at as Date | string | null,
+        })),
       )
+      const allocationByUser = new Map(
+        allocations.map((allocation) => [allocation.userId, allocation]),
+      )
+      for (const participant of cohort.rows) {
+        const allocation = allocationByUser.get(String(participant.user_id))
+        if (!allocation) throw new CoreError('정산 배분 스냅샷을 만들 수 없습니다.')
+        await client.query(
+          `INSERT INTO trip_settlement_participants (
+             trip_id, user_id, deposit_amount, final_share, allocation_rank, allocated_share
+           ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            input.tripId,
+            participant.user_id,
+            participant.amount,
+            legacyFinalShare,
+            allocation.allocationRank,
+            allocation.allocatedShare,
+          ],
+        )
+      }
     }
     await client.query(
       `UPDATE trip_groups SET status = 'SETTLEMENT_PENDING' WHERE trip_id = $1`,
@@ -2290,7 +3154,7 @@ export async function submitFareDispute(input: {
 
   await inTransaction(async (client) => {
     const participant = await client.query(
-      `SELECT s.submitted_by, s.fare_revision, p.status
+      `SELECT s.submitted_by, s.fare_revision, p.status, s.allocation_policy
        FROM trip_groups g
        JOIN trip_settlements s ON s.trip_id = g.trip_id
        JOIN trip_participants p
@@ -2301,12 +3165,21 @@ export async function submitFareDispute(input: {
         AND d.user_id = p.user_id
        WHERE g.trip_id = $1
          AND g.status = 'SETTLEMENT_PENDING'
-         AND s.status = 'PENDING_CONFIRMATION'
-         AND s.confirmation_deadline > now()
-         AND NOT EXISTS (
-           SELECT 1
-           FROM fare_confirmations c
-           WHERE c.trip_id = g.trip_id AND c.user_id = $2
+         AND (
+           (
+             s.allocation_policy = 'HOST_APPROVAL_ORDER'
+             AND s.status IN ('PENDING_CONFIRMATION', 'PROVISIONALLY_SETTLED')
+             AND s.dispute_deadline > now()
+           )
+           OR (
+             s.allocation_policy = 'LEGACY_CEIL'
+             AND s.status = 'PENDING_CONFIRMATION'
+             AND s.confirmation_deadline > now()
+             AND NOT EXISTS (
+               SELECT 1 FROM fare_confirmations c
+               WHERE c.trip_id = g.trip_id AND c.user_id = $2
+             )
+           )
          )
        FOR UPDATE OF g, s, p`,
       [input.tripId, input.actorId],
@@ -2370,7 +3243,7 @@ export async function withdrawFareDispute(input: {
     const dispute = await client.query(
       `SELECT d.status, d.resolved_by_user_id, d.resolution_idempotency_key,
               g.status AS trip_status, s.status AS settlement_status,
-              s.confirmation_deadline
+              s.confirmation_deadline, s.dispute_deadline, s.allocation_policy
        FROM fare_disputes d
        JOIN trip_groups g ON g.trip_id = d.trip_id
        JOIN trip_settlements s ON s.trip_id = d.trip_id
@@ -2386,13 +3259,16 @@ export async function withdrawFareDispute(input: {
     ) {
       return
     }
-    if (
-      !row ||
-      row.status !== 'OPEN' ||
-      row.trip_status !== 'SETTLEMENT_PENDING' ||
-      row.settlement_status !== 'PENDING_CONFIRMATION' ||
-      new Date(row.confirmation_deadline).getTime() <= Date.now()
-    ) {
+    const policyV2Window =
+      row?.allocation_policy === 'HOST_APPROVAL_ORDER' &&
+      ['PENDING_CONFIRMATION', 'PROVISIONALLY_SETTLED'].includes(row.settlement_status) &&
+      new Date(row.dispute_deadline).getTime() > Date.now()
+    const legacyWindow =
+      row?.allocation_policy === 'LEGACY_CEIL' &&
+      row.settlement_status === 'PENDING_CONFIRMATION' &&
+      new Date(row.confirmation_deadline).getTime() > Date.now()
+    if (!row || row.status !== 'OPEN' || row.trip_status !== 'SETTLEMENT_PENDING' ||
+      (!policyV2Window && !legacyWindow)) {
       throw new CoreError('확인 기한 안의 열린 이의제기만 철회할 수 있습니다.')
     }
     await client.query(
@@ -2442,7 +3318,7 @@ export async function resolveFareDispute(input: {
     const dispute = await client.query(
       `SELECT d.status, d.resolved_by_user_id, d.resolution_idempotency_key,
               g.status AS trip_status, s.status AS settlement_status,
-              s.actual_fare
+              s.allocation_policy, s.actual_fare
        FROM fare_disputes d
        JOIN trip_groups g ON g.trip_id = d.trip_id
        JOIN trip_settlements s ON s.trip_id = d.trip_id
@@ -2462,7 +3338,8 @@ export async function resolveFareDispute(input: {
       !row ||
       row.status !== 'OPEN' ||
       row.trip_status !== 'SETTLEMENT_PENDING' ||
-      row.settlement_status !== 'PENDING_CONFIRMATION'
+      row.settlement_status !== 'PENDING_CONFIRMATION' &&
+      !(row.allocation_policy === 'HOST_APPROVAL_ORDER' && row.settlement_status === 'PROVISIONALLY_SETTLED')
     ) {
       throw new CoreError('열린 정산 대기 이의제기만 처리할 수 있습니다.')
     }
@@ -2531,6 +3408,19 @@ export async function adjustFareDisputeByAdmin(input: {
 }) {
   positiveInteger(input.actualFare, '수정 실제 요금')
   const note = input.resolutionNote.trim()
+  await ensureDatabaseIdentity()
+  const sql = getDatabase()
+  const policy = await sql`
+    SELECT s.allocation_policy AS "allocationPolicy", s.status AS "settlementStatus"
+    FROM trip_settlements s
+    WHERE s.trip_id = ${input.tripId}
+  `
+  if (
+    policy[0]?.allocationPolicy === 'HOST_APPROVAL_ORDER' &&
+    policy[0]?.settlementStatus === 'PROVISIONALLY_SETTLED'
+  ) {
+    return adjustProvisionallySettledFareDisputeByAdmin(input, note)
+  }
   if (!note || note.length > 1000) {
     throw new CoreError('검토 메모는 1~1,000자로 입력해 주세요.')
   }
@@ -2664,6 +3554,227 @@ export async function adjustFareDisputeByAdmin(input: {
       )
     }
     await client.query(`UPDATE trip_groups SET status = 'SETTLEMENT_PENDING' WHERE trip_id = $1`, [input.tripId])
+  })
+}
+
+async function adjustProvisionallySettledFareDisputeByAdmin(
+  input: {
+    adminId: string
+    tripId: string
+    disputeId: string
+    actualFare: number
+    resolutionNote: string
+    idempotencyKey: string
+  },
+  note: string,
+) {
+  return inTransaction(async (client) => {
+    const admin = await client.query(
+      `SELECT 1 FROM users
+       WHERE user_id = $1 AND role = 'ADMIN' AND account_status = 'ACTIVE'
+       FOR UPDATE`,
+      [input.adminId],
+    )
+    if (!admin.rowCount) throw new CoreError('활성 관리자만 실제 요금을 조정할 수 있습니다.')
+
+    const settlement = await client.query(
+      `SELECT g.status AS trip_status, s.status AS settlement_status,
+              s.allocation_policy, s.actual_fare, s.participant_count, s.fare_revision
+       FROM trip_groups g
+       JOIN trip_settlements s ON s.trip_id = g.trip_id
+       WHERE g.trip_id = $1
+       FOR UPDATE OF g, s`,
+      [input.tripId],
+    )
+    const row = settlement.rows[0]
+    if (!row || row.trip_status !== 'SETTLEMENT_PENDING' ||
+      row.allocation_policy !== 'HOST_APPROVAL_ORDER' ||
+      row.settlement_status !== 'PROVISIONALLY_SETTLED') {
+      throw new CoreError('잠정 정산된 정책 v2 이동만 보정할 수 있습니다.')
+    }
+    if (Number(row.actual_fare) === input.actualFare) {
+      throw new CoreError('수정 요금은 기존 실제 요금과 달라야 합니다.')
+    }
+
+    const replay = await client.query(
+      `SELECT command_id, trip_id, dispute_id, revised_actual_fare, reason
+       FROM policy_v2_adjustment_commands
+       WHERE admin_user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      const command = replay.rows[0]
+      if (command.trip_id === input.tripId && command.dispute_id === input.disputeId &&
+        Number(command.revised_actual_fare) === input.actualFare && command.reason === note) {
+        return
+      }
+      throw new CoreError('이미 다른 관리자 보정 요청에 사용한 식별자입니다.')
+    }
+
+    const dispute = await client.query(
+      `SELECT status, fare_revision
+       FROM fare_disputes
+       WHERE dispute_id = $1 AND trip_id = $2
+       FOR UPDATE`,
+      [input.disputeId, input.tripId],
+    )
+    if (!dispute.rowCount || dispute.rows[0].status !== 'OPEN' ||
+      Number(dispute.rows[0].fare_revision) !== Number(row.fare_revision)) {
+      throw new CoreError('현재 열린 실제 요금 이의만 보정할 수 있습니다.')
+    }
+    const otherOpenDisputes = await client.query(
+      `SELECT 1 FROM fare_disputes
+       WHERE trip_id = $1 AND fare_revision = $2
+         AND status = 'OPEN' AND dispute_id <> $3
+       FOR UPDATE`,
+      [input.tripId, row.fare_revision, input.disputeId],
+    )
+    if (otherOpenDisputes.rowCount) {
+      throw new CoreError('요금을 조정하기 전에 같은 이동의 다른 열린 이의를 모두 처리해야 합니다.')
+    }
+
+    const snapshots = await client.query(
+      `SELECT user_id, allocated_share, allocation_rank
+       FROM trip_settlement_participants
+       WHERE trip_id = $1
+       ORDER BY user_id
+       FOR UPDATE`,
+      [input.tripId],
+    )
+    if (snapshots.rowCount !== Number(row.participant_count)) {
+      throw new CoreError('정산 참여자 스냅샷이 실제 정산 인원과 일치하지 않습니다.')
+    }
+    const balances = await client.query(
+      `SELECT user_id, available_points
+       FROM point_accounts
+       WHERE user_id = ANY($1::uuid[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      [snapshots.rows.map((snapshot) => snapshot.user_id)],
+    )
+    if (balances.rowCount !== snapshots.rowCount) {
+      throw new CoreError('보정 대상 포인트 계정을 찾을 수 없습니다.')
+    }
+    const debts = await client.query(
+      `SELECT debt_id, user_id, outstanding_points
+       FROM point_debt_obligations
+       WHERE trip_id = $1 AND fare_revision = $2
+         AND user_id = ANY($3::uuid[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      [input.tripId, row.fare_revision, snapshots.rows.map((snapshot) => snapshot.user_id)],
+    )
+    const availableByUser = new Map(
+      balances.rows.map((balance) => [String(balance.user_id), Number(balance.available_points)]),
+    )
+    const debtByUser = new Map(
+      debts.rows.map((debt) => [
+        String(debt.user_id),
+        { debtId: String(debt.debt_id), outstandingPoints: Number(debt.outstanding_points) },
+      ]),
+    )
+    const baseShare = Math.floor(input.actualFare / Number(row.participant_count))
+    const higherShareStartsAt = Number(row.participant_count) -
+      (input.actualFare % Number(row.participant_count))
+    const allocations = snapshots.rows.map((snapshot) => {
+      const allocationRank = Number(snapshot.allocation_rank)
+      const revisedShare = baseShare + (allocationRank > higherShareStartsAt ? 1 : 0)
+      return {
+        userId: String(snapshot.user_id),
+        previousShare: Number(snapshot.allocated_share),
+        revisedShare,
+      }
+    })
+
+    await client.query(
+      `UPDATE fare_disputes
+       SET status = 'RESOLVED', resolved_at = now(), resolution_note = $2,
+           resolved_by_user_id = $3, resolution_idempotency_key = $4
+       WHERE dispute_id = $1`,
+      [input.disputeId, note, input.adminId, input.idempotencyKey],
+    )
+    const command = await client.query(
+      `INSERT INTO policy_v2_adjustment_commands (
+         trip_id, dispute_id, fare_revision, previous_actual_fare,
+         revised_actual_fare, admin_user_id, reason, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING command_id`,
+      [
+        input.tripId, input.disputeId, row.fare_revision, row.actual_fare,
+        input.actualFare, input.adminId, note, input.idempotencyKey,
+      ],
+    )
+    const commandId = String(command.rows[0]?.command_id ?? '')
+    if (!commandId) throw new CoreError('보정 정산 명령을 만들지 못했습니다.')
+
+    for (const allocation of allocations) {
+      await client.query(
+        `INSERT INTO policy_v2_adjustment_allocations (
+           command_id, user_id, previous_share, revised_share
+         ) VALUES ($1, $2, $3, $4)`,
+        [commandId, allocation.userId, allocation.previousShare, allocation.revisedShare],
+      )
+    }
+
+    for (const allocation of allocations) {
+      const existingDebt = debtByUser.get(allocation.userId)
+      const amounts = calculatePolicyV2AdjustmentAmounts({
+        previousShare: allocation.previousShare,
+        revisedShare: allocation.revisedShare,
+        availablePoints: availableByUser.get(allocation.userId) ?? 0,
+        outstandingDebt: existingDebt?.outstandingPoints ?? 0,
+      })
+      if (amounts.availableDebit > 0) {
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, policy_v2_adjustment_command_id, reason, idempotency_key
+           ) VALUES ($1, 'FARE_ADJUSTMENT_DEBIT', $2, 0, $3, $4, $5,
+             'policy-v2 fare adjustment debit', $6)`,
+          [allocation.userId, -amounts.availableDebit, input.tripId, input.adminId, commandId,
+            `adjustment:${commandId}:debit:${allocation.userId}`],
+        )
+      }
+
+      if (amounts.debtIncrease > 0 || amounts.debtReduction > 0) {
+        let debtId = existingDebt?.debtId
+        if (!debtId) {
+          const createdDebt = await client.query(
+            `INSERT INTO point_debt_obligations (user_id, trip_id, fare_revision)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (trip_id, user_id, fare_revision) DO NOTHING
+             RETURNING debt_id`,
+            [allocation.userId, input.tripId, row.fare_revision],
+          )
+          debtId = createdDebt.rows[0]?.debt_id as string | undefined
+        }
+        if (!debtId) {
+          throw new CoreError('외상 보정 의무를 안전하게 만들지 못했습니다.')
+        }
+        const debtDelta = amounts.debtIncrease || -amounts.debtReduction
+        await client.query(
+          `INSERT INTO point_debt_events (
+             debt_id, user_id, event_type, debt_delta, actor_user_id, reason,
+             idempotency_key, policy_v2_adjustment_command_id
+           ) VALUES ($1, $2, 'DISPUTE_ADJUSTMENT', $3, $4,
+             'policy-v2 fare adjustment debt', $5, $6)`,
+          [debtId, allocation.userId, debtDelta, input.adminId,
+            `adjustment:${commandId}:debt:${allocation.userId}`, commandId],
+        )
+      }
+      if (amounts.availableRefund > 0) {
+        await client.query(
+          `INSERT INTO point_ledger (
+             user_id, entry_type, available_delta, held_delta, trip_id,
+             actor_user_id, policy_v2_adjustment_command_id, reason, idempotency_key
+           ) VALUES ($1, 'FARE_ADJUSTMENT_REFUND', $2, 0, $3, $4, $5,
+             'policy-v2 fare adjustment refund', $6)`,
+          [allocation.userId, amounts.availableRefund, input.tripId, input.adminId, commandId,
+            `adjustment:${commandId}:refund:${allocation.userId}`],
+        )
+      }
+    }
   })
 }
 
@@ -3029,20 +4140,54 @@ export async function processDueTransitions() {
   const closed = await closeDueTrips()
   const sql = getDatabase()
   const dueSettlements = await sql`
-    SELECT s.trip_id AS "tripId"
+    SELECT s.trip_id AS "tripId", s.allocation_policy AS "allocationPolicy",
+           s.status AS "settlementStatus"
     FROM trip_settlements s
     JOIN trip_groups g ON g.trip_id = s.trip_id
     WHERE g.status = 'SETTLEMENT_PENDING'
-      AND s.status = 'PENDING_CONFIRMATION'
       AND s.resubmission_required = false
-      AND s.confirmation_deadline <= now()
-    ORDER BY s.confirmation_deadline, s.trip_id
+      AND (
+        (
+          s.allocation_policy = 'LEGACY_CEIL'
+          AND s.status = 'PENDING_CONFIRMATION'
+          AND s.confirmation_deadline <= now()
+        )
+        OR (
+          s.allocation_policy = 'HOST_APPROVAL_ORDER'
+          AND s.status = 'PENDING_CONFIRMATION'
+          AND (
+            s.agreement_deadline <= now()
+            OR NOT EXISTS (
+              SELECT 1
+              FROM trip_settlement_participants sp
+              LEFT JOIN fare_confirmations c
+                ON c.trip_id = sp.trip_id AND c.user_id = sp.user_id
+              WHERE sp.trip_id = s.trip_id AND c.user_id IS NULL
+            )
+          )
+        )
+        OR (
+          s.allocation_policy = 'HOST_APPROVAL_ORDER'
+          AND s.status = 'PROVISIONALLY_SETTLED'
+          AND s.dispute_deadline <= now()
+        )
+      )
+    ORDER BY s.agreement_deadline NULLS LAST, s.confirmation_deadline, s.trip_id
     LIMIT 100
   `
   let settled = 0
   let skipped = 0
-  for (const due of dueSettlements as { tripId: string }[]) {
-    if ((await settleTripAtDeadline(due.tripId)) === 'SETTLED') settled += 1
+  for (const due of dueSettlements as {
+    tripId: string
+    allocationPolicy: string
+    settlementStatus: string
+  }[]) {
+    const result = due.allocationPolicy === 'HOST_APPROVAL_ORDER'
+      ? due.settlementStatus === 'PENDING_CONFIRMATION'
+        ? await provisionallySettleTripV2({ tripId: due.tripId, idempotencyKey: randomUUID() })
+        : await finalizePolicyV2Settlement({ tripId: due.tripId, idempotencyKey: randomUUID() })
+      : await settleTripAtDeadline(due.tripId)
+    if (result === 'SETTLED') settled += 1
     else skipped += 1
   }
   return { closed, scannedSettlements: dueSettlements.length, settled, skipped }

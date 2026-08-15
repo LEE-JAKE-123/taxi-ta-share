@@ -128,7 +128,10 @@ export async function getAdminFareDisputes(actorId: string) {
       s.final_share AS "finalShare",
       s.participant_count AS "participantCount",
       s.fare_revision AS "fareRevision",
+      s.status AS "settlementStatus",
+      s.allocation_policy AS "allocationPolicy",
       s.confirmation_deadline AS "confirmationDeadline",
+      s.dispute_deadline AS "disputeDeadline",
       estimate.route_distance_m AS "routeDistanceM",
       estimate.duration_seconds AS "durationSeconds",
       estimate.provider_key AS "routeProvider",
@@ -146,7 +149,7 @@ export async function getAdminFareDisputes(actorId: string) {
     ) estimate ON true
     WHERE d.status = 'OPEN'
       AND g.status = 'SETTLEMENT_PENDING'
-      AND s.status = 'PENDING_CONFIRMATION'
+      AND s.status IN ('PENDING_CONFIRMATION', 'PROVISIONALLY_SETTLED')
     ORDER BY d.submitted_at ASC
     LIMIT 100
   `
@@ -164,7 +167,10 @@ export async function getAdminFareDisputes(actorId: string) {
     finalShare: number
     participantCount: number
     fareRevision: number
+    settlementStatus: string
+    allocationPolicy: string
     confirmationDeadline: string
+    disputeDeadline: string | null
     routeDistanceM: number | null
     durationSeconds: number | null
     routeProvider: string | null

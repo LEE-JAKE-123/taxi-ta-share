@@ -76,6 +76,40 @@ const designatedFareSubmissionGuardMigrationChecksum = createHash('sha256')
 const tripGroupHostMemoMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0021_trip_group_host_memo.sql'))
   .digest('hex')
+const provisionalSettlementDebtMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0022_provisional_settlement_debt.sql'))
+  .digest('hex')
+const policyV2SettlementGuardsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0023_policy_v2_settlement_guards.sql'))
+  .digest('hex')
+const policyV2ProvisionalAtomicityMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0024_policy_v2_provisional_atomicity.sql'))
+  .digest('hex')
+const policyV2OpenDebtTimestampMigrationChecksum = createHash('sha256')
+  .update(
+    await readFile(
+      'db/migrations/0025_policy_v2_open_debt_settlement_timestamp.sql',
+    ),
+  )
+  .digest('hex')
+const policyV2DisputeAdjustmentsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0026_policy_v2_dispute_adjustments.sql'))
+  .digest('hex')
+const policyV2AdjustmentTriggerDispatchMigrationChecksum = createHash('sha256')
+  .update(
+    await readFile('db/migrations/0027_policy_v2_adjustment_trigger_dispatch.sql'),
+  )
+  .digest('hex')
+const policyV2DebtRepaymentMigrationChecksum = createHash('sha256')
+  .update(
+    await readFile('db/migrations/0028_policy_v2_debt_repayment_and_eligibility.sql'),
+  )
+  .digest('hex')
+const debtRepaymentLedgerTypeMigrationChecksum = createHash('sha256')
+  .update(
+    await readFile('db/migrations/0029_debt_repayment_ledger_type_guard.sql'),
+  )
+  .digest('hex')
 
 if (
   !databaseUrl ||
@@ -256,6 +290,208 @@ try {
           AND checksum = $20
           AND environment = $1
       ) AS trip_group_host_memo_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0022_provisional_settlement_debt'
+          AND checksum = $21
+          AND environment = $1
+      ) AS provisional_settlement_debt_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0023_policy_v2_settlement_guards'
+          AND checksum = $22
+          AND environment = $1
+      ) AS policy_v2_settlement_guards_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0024_policy_v2_provisional_atomicity'
+          AND checksum = $23
+          AND environment = $1
+      ) AS policy_v2_provisional_atomicity_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0025_policy_v2_open_debt_settlement_timestamp'
+          AND checksum = $24
+          AND environment = $1
+      ) AS policy_v2_open_debt_timestamp_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0026_policy_v2_dispute_adjustments'
+          AND checksum = $25
+          AND environment = $1
+      ) AS policy_v2_dispute_adjustments_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0027_policy_v2_adjustment_trigger_dispatch'
+          AND checksum = $26
+          AND environment = $1
+      ) AS policy_v2_adjustment_trigger_dispatch_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0028_policy_v2_debt_repayment_and_eligibility'
+          AND checksum = $27
+          AND environment = $1
+      ) AS policy_v2_debt_repayment_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0029_debt_repayment_ledger_type_guard'
+          AND checksum = $28
+          AND environment = $1
+      ) AS debt_repayment_ledger_type_migration_valid,
+      position(
+        $$OR ledger_entry_type <> 'DEBT_REPAYMENT'$$
+        IN pg_get_functiondef('validate_point_debt_repayment()'::regprocedure)
+      ) > 0 AS debt_repayment_ledger_type_guard_valid,
+      (
+        SELECT count(*) = 0
+        FROM point_debt_events e
+        LEFT JOIN point_ledger l ON l.ledger_id = e.repayment_ledger_id
+        WHERE e.event_type = 'REPAYMENT'
+          AND l.entry_type IS DISTINCT FROM 'DEBT_REPAYMENT'
+      ) AS debt_repayment_links_valid,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'system_deadline_commands'::regclass
+          AND tgname = 'system_deadline_commands_validate_policy_v2_linkage'
+          AND NOT tgisinternal
+      ) AS policy_v2_command_linkage_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_ledger'::regclass
+          AND tgname = 'point_ledger_guard_policy_v2_provisional_state'
+          AND NOT tgisinternal
+      ) AS policy_v2_ledger_state_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_settlements'::regclass
+          AND tgname = 'trip_settlements_validate_policy_v2_financials'
+          AND NOT tgisinternal
+      ) AS policy_v2_financial_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_debt_events'::regclass
+          AND tgname = 'point_debt_events_validate_policy_v2'
+          AND NOT tgisinternal
+      ) AS policy_v2_debt_guard_exists,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'trip_settlements'
+          AND column_name = 'agreement_deadline'
+      ) AS agreement_deadline_column_exists,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'trip_settlements'
+          AND column_name = 'dispute_deadline'
+      ) AS dispute_deadline_column_exists,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'trip_settlement_participants'
+          AND column_name = 'allocated_share'
+      ) AS allocated_share_column_exists,
+      to_regclass('public.point_debt_obligations') IS NOT NULL
+        AS debt_obligations_exists,
+      to_regclass('public.point_debt_events') IS NOT NULL AS debt_events_exists,
+      to_regclass('public.policy_v2_adjustment_commands') IS NOT NULL
+        AS adjustment_commands_exists,
+      to_regclass('public.policy_v2_adjustment_allocations') IS NOT NULL
+        AS adjustment_allocations_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'fare_disputes'::regclass
+          AND tgname = 'fare_disputes_validate_policy_v2_resolved_command'
+          AND NOT tgisinternal
+      ) AS resolved_dispute_command_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_settlements'::regclass
+          AND tgname = 'trip_settlements_validate_policy_v2_finalization_adjustments'
+          AND NOT tgisinternal
+      ) AS finalization_adjustment_guard_exists,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'point_debt_obligations'
+          AND column_name = 'settled_at'
+          AND is_nullable = 'YES'
+      ) AS debt_open_timestamp_nullable,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'trip_settlement_participants_allocation_rank_unique_idx'
+      ) AS allocation_rank_index_exists,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'point_debt_obligations_user_open_idx'
+      ) AS debt_open_index_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_accounts'::regclass
+          AND tgname = 'point_accounts_prevent_direct_debt_mutation'
+          AND NOT tgisinternal
+      ) AS direct_debt_projection_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_debt_events'::regclass
+          AND tgname = 'point_debt_events_prevent_mutation'
+          AND NOT tgisinternal
+      ) AS debt_events_append_only,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_debt_events'::regclass
+          AND tgname = 'point_debt_events_validate_repayment'
+          AND NOT tgisinternal
+      ) AS debt_repayment_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_groups'::regclass
+          AND tgname = 'trip_groups_guard_policy_v2_usage_eligibility'
+          AND NOT tgisinternal
+      ) AS debt_usage_eligibility_guard_exists,
+      (
+        SELECT count(*) = 0
+        FROM trip_settlements s
+        WHERE (s.allocation_policy = 'LEGACY_CEIL' AND (
+            s.agreement_deadline IS NOT NULL
+            OR s.dispute_deadline IS NOT NULL
+            OR s.provisionally_settled_at IS NOT NULL
+          ))
+          OR (s.allocation_policy = 'HOST_APPROVAL_ORDER' AND (
+            s.confirmation_deadline <> s.submitted_at + interval '10 minutes'
+            OR s.agreement_deadline <> s.submitted_at + interval '10 minutes'
+            OR s.dispute_deadline <> s.submitted_at + interval '24 hours'
+            OR (s.status = 'PENDING_CONFIRMATION' AND s.provisionally_settled_at IS NOT NULL)
+            OR (s.status IN ('PROVISIONALLY_SETTLED', 'COMPLETED')
+              AND (s.provisionally_settled_at IS NULL
+                OR s.provisionally_settled_at < s.submitted_at))
+          ))
+      ) AS policy_v2_deadlines_valid,
+      (
+        SELECT count(*) = 0
+        FROM point_accounts a
+        LEFT JOIN (
+          SELECT user_id, coalesce(sum(outstanding_points), 0)::bigint AS outstanding_points
+          FROM point_debt_obligations
+          GROUP BY user_id
+        ) d ON d.user_id = a.user_id
+        WHERE a.debt_points < 0
+          OR a.debt_points <> coalesce(d.outstanding_points, 0)
+      ) AS debt_projection_valid,
       EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -712,6 +948,14 @@ try {
     safetyReportsMigrationChecksum,
     designatedFareSubmissionGuardMigrationChecksum,
     tripGroupHostMemoMigrationChecksum,
+    provisionalSettlementDebtMigrationChecksum,
+    policyV2SettlementGuardsMigrationChecksum,
+    policyV2ProvisionalAtomicityMigrationChecksum,
+    policyV2OpenDebtTimestampMigrationChecksum,
+    policyV2DisputeAdjustmentsMigrationChecksum,
+    policyV2AdjustmentTriggerDispatchMigrationChecksum,
+    policyV2DebtRepaymentMigrationChecksum,
+    debtRepaymentLedgerTypeMigrationChecksum,
   ])
 
   const verification = result.rows[0]

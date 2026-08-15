@@ -29,6 +29,7 @@ export async function GET(request: Request) {
         typeof error === 'object' && error && 'code' in error
           ? String(error.code)
           : undefined,
+      message: error instanceof Error ? error.message : undefined,
     })
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 })
   }

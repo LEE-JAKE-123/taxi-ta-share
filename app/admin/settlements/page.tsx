@@ -101,6 +101,15 @@ export default async function AdminSettlementsPage({
                   </dd>
                 </div>
               </dl>
+              {dispute.allocationPolicy === 'HOST_APPROVAL_ORDER' &&
+              dispute.settlementStatus === 'PROVISIONALLY_SETTLED' ? (
+                <p className="rounded-xl bg-info-soft px-3 py-2 text-sm" role="status">
+                  잠정 정산 상태입니다. 이의제기 기한:{' '}
+                  {dispute.disputeDeadline
+                    ? new Date(dispute.disputeDeadline).toLocaleString('ko-KR')
+                    : '확인 필요'}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 {dispute.routeProvider && dispute.routeCalculatedAt
                   ? `경로 제공자 ${dispute.routeProvider} · ${new Date(dispute.routeCalculatedAt).toLocaleString('ko-KR')} 산정`
@@ -128,8 +137,13 @@ export default async function AdminSettlementsPage({
                 >
                   <option value="" disabled>처리 방식을 선택하세요</option>
                   <option value="REJECTED">기각 — 기존 요금으로 확인 재개</option>
-                  <option value="ADJUSTED">관리자 수정 요금으로 새 확인 시작</option>
-                  <option value="FORCE_SETTLE">현재 요금으로 강제 정산</option>
+                  {dispute.allocationPolicy === 'HOST_APPROVAL_ORDER' &&
+                  dispute.settlementStatus === 'PROVISIONALLY_SETTLED' ? (
+                    <option value="ADJUSTED">수정 요금 보정 원장 기록</option>
+                  ) : null}
+                  {dispute.settlementStatus === 'PENDING_CONFIRMATION' ? (
+                    <option value="FORCE_SETTLE">현재 요금으로 강제 정산</option>
+                  ) : null}
                 </select>
                 <label
                   htmlFor={`fare-dispute-actual-fare-${dispute.disputeId}`}

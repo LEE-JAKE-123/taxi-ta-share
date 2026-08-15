@@ -793,7 +793,7 @@ export async function resolveFareDisputeAction(formData: FormData) {
   }
   finishAdminSettlement(
     outcome === 'ADJUSTED'
-      ? '관리자가 실제 요금을 수정했습니다. 참여자 확인을 새로 시작합니다.'
+      ? '관리자가 수정 요금의 보정 원장을 기록했습니다. 잠정 정산과 남은 이의제기 기한은 유지됩니다.'
       : outcome === 'FORCE_SETTLE'
         ? '관리자 강제 정산을 완료했습니다. 거래 내역을 확인할 수 있습니다.'
         : '이의제기를 기각했습니다. 실제 요금 확인과 정산을 다시 진행할 수 있습니다.',

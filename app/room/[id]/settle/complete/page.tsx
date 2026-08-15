@@ -10,6 +10,8 @@ import { CoreError, getTripJourney } from '@/lib/core/service'
 export const dynamic = 'force-dynamic'
 
 const ledgerLabels: Record<string, string> = {
+  FARE_ADJUSTMENT_REFUND: '요금 보정 반환',
+  FARE_ADJUSTMENT_DEBIT: '요금 보정 추가 차감',
   DEPOSIT: '예상 요금 예치',
   SETTLEMENT_CHARGE: '예치금 최종 정산',
   REFUND: '정산 차액 반환',
@@ -58,7 +60,7 @@ export default async function SettleCompletePage({
           </div>
           <Row
             label="실제 총요금"
-            value={`${Number(settlement.actualFare).toLocaleString('ko-KR')}P`}
+            value={`${Number(settlement.effectiveActualFare).toLocaleString('ko-KR')}P`}
           />
           <Row label="정산 인원" value={`${settlement.participantCount}명`} />
           <Row
@@ -67,11 +69,17 @@ export default async function SettleCompletePage({
           />
           <Row
             label="1인 최종 부담"
-            value={`${Number(settlement.finalShare).toLocaleString('ko-KR')}P`}
+            value={`${Number(settlement.currentUserFinalShare).toLocaleString('ko-KR')}P`}
             strong
           />
           <Row label="정산 상태" value="정산 완료" strong />
         </Card>
+
+        {settlement.hasFareAdjustment ? (
+          <p className="rounded-xl bg-info-soft px-4 py-3 text-sm" role="status">
+            관리자 요금 보정이 반영된 최종 결과입니다. 보정 내역은 아래 포인트 거래에서 확인할 수 있습니다.
+          </p>
+        ) : null}
 
         <section>
           <CardTitle className="mb-3">내 포인트 거래 내역</CardTitle>

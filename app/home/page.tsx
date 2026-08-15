@@ -5,7 +5,6 @@ import { DatabaseRoomCard } from '@/components/database-room-card'
 import { EmptyState } from '@/components/empty-state'
 import { MobileShell } from '@/components/mobile-shell'
 import { RecommendationCard } from '@/components/recommendation-card'
-import { PlaceRecommendationSearch } from '@/components/place-recommendation-search'
 import { TabBar } from '@/components/tab-bar'
 import { requireCompleteUser } from '@/lib/auth/session'
 import { getCoreDashboard, getDiscoverableTrips } from '@/lib/core/service'
@@ -66,8 +65,6 @@ export default async function HomePage({
             포인트는 관리자가 지급하는 가상 포인트입니다.
           </p>
         </Link>
-
-        <PlaceRecommendationSearch />
 
         <section className="mt-7" aria-labelledby="recommendation-heading">
           <div className="flex items-end justify-between gap-3">

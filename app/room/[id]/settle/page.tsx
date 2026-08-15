@@ -37,23 +37,38 @@ export default async function SettlePage({
     redirect(`/room/${trip.tripId}`)
   }
   const isHost = trip.hostUserId === user.userId
+  const isPolicyV2 = settlement?.allocationPolicy === 'HOST_APPROVAL_ORDER'
+  const isProvisionallySettled =
+    isPolicyV2 && settlement?.status === 'PROVISIONALLY_SETTLED'
   const canConfirm =
     trip.status === 'SETTLEMENT_PENDING' &&
     settlement?.status === 'PENDING_CONFIRMATION' &&
     !settlement.currentUserConfirmed &&
     !settlement.currentUserHasOpenDispute
-  const canDispute =
+  const canDispute = Boolean(
     trip.status === 'SETTLEMENT_PENDING' &&
-    settlement?.status === 'PENDING_CONFIRMATION' &&
-    !settlement.currentUserConfirmed &&
+    settlement &&
+    !settlement.currentUserSubmittedFare &&
     !settlement.currentUserHasOpenDispute &&
-    !isHost
+    ((
+      isPolicyV2 &&
+      (settlement?.status === 'PROVISIONALLY_SETTLED' ||
+        (settlement?.status === 'PENDING_CONFIRMATION' &&
+          !settlement.currentUserConfirmed)) &&
+      !settlement.disputeExpired
+    ) ||
+      (!isPolicyV2 &&
+        settlement?.status === 'PENDING_CONFIRMATION' &&
+        !settlement.currentUserConfirmed &&
+        !settlement.confirmationExpired)),
+  )
   const allConfirmed =
     settlement &&
     settlement.confirmationCount === settlement.participantCount
   const confirmationExpired = settlement?.confirmationExpired
   const canSettle =
     isHost &&
+    !isPolicyV2 &&
     settlement?.status === 'PENDING_CONFIRMATION' &&
     settlement.openDisputeCount === 0 &&
     (allConfirmed || confirmationExpired)
@@ -116,7 +131,7 @@ export default async function SettlePage({
             <CardTitle>정산 미리보기</CardTitle>
             <Row
               label="실제 총요금"
-              value={`${Number(settlement.actualFare).toLocaleString('ko-KR')}P`}
+              value={`${Number(settlement.effectiveActualFare).toLocaleString('ko-KR')}P`}
             />
             <Row
               label="정산 인원"
@@ -124,13 +139,37 @@ export default async function SettlePage({
             />
             <Row
               label="1인 최종 부담"
-              value={`${Number(settlement.finalShare).toLocaleString('ko-KR')}P`}
+              value={`${Number(settlement.currentUserFinalShare).toLocaleString('ko-KR')}P`}
               strong
             />
             <Row
               label="요금 확인"
               value={`${settlement.confirmationCount}/${settlement.participantCount}명`}
             />
+          </Card>
+        ) : null}
+
+        {settlement && isPolicyV2 ? (
+          <Card className="gap-2" aria-live="polite">
+            <CardTitle>
+              {isProvisionallySettled ? '잠정 정산 상태' : '동의·이의제기 기한'}
+            </CardTitle>
+            {isProvisionallySettled ? (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                잠정 정산이 기록되었습니다. 이의제기는{' '}
+                <strong className="text-foreground">
+                  {formatDeadline(settlement.disputeDeadline)}
+                </strong>
+                까지 접수할 수 있으며, 열린 이의가 없고 기한이 지나면 시스템이 최종 완료합니다.
+              </p>
+            ) : (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                동의는 <strong className="text-foreground">{formatDeadline(settlement.confirmationDeadline)}</strong>
+                까지 가능하며, 이의제기는{' '}
+                <strong className="text-foreground">{formatDeadline(settlement.disputeDeadline)}</strong>
+                까지 접수할 수 있습니다. 전원 동의 또는 동의 기한 만료 시 잠정 정산됩니다.
+              </p>
+            )}
           </Card>
         ) : null}
       </main>
@@ -243,4 +282,12 @@ function Row({
       </span>
     </div>
   )
+}
+
+function formatDeadline(value: string | null) {
+  if (!value) return '기한 확인 중'
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
 }

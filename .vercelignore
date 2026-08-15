@@ -1,3 +1,7 @@
 # Secrets are configured in Vercel's encrypted environment settings and must
 # never be sent as project source files during a CLI deployment.
 .env*
+.neon
+test-results/
+playwright-report/
+*.tsbuildinfo

@@ -575,6 +575,14 @@ export async function getAdminPointDashboard(actorId: string) {
       FROM users
       WHERE account_status = 'ACTIVE'
         AND role = 'USER'
+        -- These are non-human provider/production verification accounts. They
+        -- must never be offered as point recipients in the admin workflow.
+        AND lower(btrim(name)) NOT IN (
+          'map api',
+          'route api',
+          'production verification',
+          'production verfication'
+        )
       ORDER BY name, student_id
       LIMIT 200
     `,
@@ -2236,7 +2244,7 @@ export async function grantPoints(input: {
 
   return inTransaction(async (client) => {
     const actors = await client.query(
-      `SELECT user_id, role, account_status
+      `SELECT user_id, name, role, account_status
        FROM users
        WHERE user_id = ANY($1::uuid[])
        ORDER BY user_id
@@ -2252,7 +2260,13 @@ export async function grantPoints(input: {
       !target ||
       target.account_status !== 'ACTIVE' ||
       target.role !== 'USER' ||
-      target.user_id === input.adminId
+      target.user_id === input.adminId ||
+      [
+        'map api',
+        'route api',
+        'production verification',
+        'production verfication',
+      ].includes(String(target.name ?? '').trim().toLowerCase())
     ) {
       throw new CoreError('활성 일반 사용자에게만 포인트를 지급할 수 있습니다.')
     }

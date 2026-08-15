@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/card'
 import { StatusBadge } from '@/components/status-badge'
 import { RoomRouteEstimate } from '@/components/room-route-estimate'
 import { RouteMap } from '@/components/route-map'
+import { cn } from '@/lib/utils'
 
 export type DatabaseRoomSummary = {
   tripId: string
@@ -73,7 +74,13 @@ export function DatabaseRoomCard({
   const availableSeats = Math.max(room.maxParticipants - room.approvedCount, 0)
 
   return (
-    <Card className="flex flex-col gap-3">
+    <Card
+      className={cn(
+        'flex flex-col gap-3',
+        !isOpen && 'border-border bg-muted/45',
+      )}
+      aria-label={`${roomStatusLabel(room.status)} 방`}
+    >
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge tone={isOpen ? 'mint' : 'muted'}>
           {roomStatusLabel(room.status)}

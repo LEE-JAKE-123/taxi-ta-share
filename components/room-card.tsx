@@ -4,13 +4,20 @@ import { Card } from '@/components/ui/card'
 import { StatusBadge } from '@/components/status-badge'
 import { AvatarStack } from '@/components/avatar'
 import { formatPoints, type Room } from '@/lib/mock-data'
+import { cn } from '@/lib/utils'
 
 export function RoomCard({ room }: { room: Room }) {
   const seatsLeft = room.maxSeats - room.members.length
   const closed = room.status === 'closed'
 
   return (
-    <Card className="flex flex-col gap-3">
+    <Card
+      className={cn(
+        'flex flex-col gap-3',
+        closed && 'border-border bg-muted/45',
+      )}
+      aria-label={`${closed ? '모집 마감' : '모집 중'} 방`}
+    >
       <div className="flex flex-wrap items-center gap-1.5">
         {closed ? (
           <StatusBadge tone="muted">모집 마감</StatusBadge>

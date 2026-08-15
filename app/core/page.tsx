@@ -3,6 +3,7 @@ import { Coins, ShieldCheck, Users } from 'lucide-react'
 import { formatDeparture } from '@/components/database-room-card'
 import { MobileShell } from '@/components/mobile-shell'
 import { Card } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 import { requireCompleteUser } from '@/lib/auth/session'
 import { getCoreDashboard } from '@/lib/core/service'
 import {
@@ -95,7 +96,13 @@ export default async function CorePage({
               const settlement = data.settlements.find((item) => item.tripId === trip.tripId)
               const isHost = trip.hostUserId === user.userId
               return (
-                <Card key={trip.tripId}>
+                <Card
+                  key={trip.tripId}
+                  className={cn(
+                    trip.status !== 'OPEN' && 'border-border bg-muted/45',
+                  )}
+                  aria-label={`${trip.status === 'OPEN' ? '모집 중' : '모집 마감'} 방`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-extrabold">{trip.origin} → {trip.destination}</h3>

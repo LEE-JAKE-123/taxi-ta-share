@@ -212,22 +212,13 @@ test('관리자가 이의를 기각하면 요금·원장·정산 제안은 유�
   expect(await queryOne(`SELECT ledger_id FROM point_ledger WHERE trip_id = $1 AND entry_type IN ('SETTLEMENT_CHARGE', 'REFUND', 'ADDITIONAL_DEBIT')`, [fixture.tripId])).toHaveLength(0)
 })
 
-test('관리자 요금 수정은 새 확인 차수를 만들고 원장을 쓰지 않는다', async ({ page }) => {
+test('legacy confirmation-stage dispute does not offer the policy-v2 adjustment action', async ({ page }) => {
   const fixture = await seedPendingDispute()
   await openAdmin(page, fixture)
   const form = disputeForm(page, fixture.tripId)
-  await form.locator('select[name="outcome"]').selectOption('ADJUSTED')
-  await form.locator('input[name="actualFare"]').fill('12001')
-  await form.locator('textarea[name="resolutionNote"]').fill('영수증 금액으로 수정합니다.')
-  await form.getByRole('button').click()
-  await expect(form).toHaveCount(0, { timeout: 60_000 })
-  const [settlement] = await queryOne<{ actual_fare: number; final_share: number; fare_revision: number; status: string; resubmission_required: boolean }>(
-    `SELECT actual_fare, final_share, fare_revision, status, resubmission_required FROM trip_settlements WHERE trip_id = $1`, [fixture.tripId],
-  )
-  expect(settlement).toMatchObject({ actual_fare: 12001, final_share: 4001, fare_revision: 2, status: 'PENDING_CONFIRMATION', resubmission_required: false })
-  expect(await queryOne(`SELECT command_id FROM admin_dispute_commands WHERE trip_id = $1 AND command_type = 'ADJUST_FARE'`, [fixture.tripId])).toHaveLength(1)
-  expect(await queryOne(`SELECT ledger_id FROM point_ledger WHERE trip_id = $1 AND entry_type IN ('SETTLEMENT_CHARGE', 'REFUND', 'ADDITIONAL_DEBIT')`, [fixture.tripId])).toHaveLength(0)
-  expect(await queryOne(`SELECT user_id FROM trip_settlement_participants WHERE trip_id = $1`, [fixture.tripId])).toHaveLength(3)
+  await expect(form.locator('option[value="ADJUSTED"]')).toHaveCount(0)
+  await expect(form.locator('option[value="REJECTED"]')).toHaveCount(1)
+  await expect(form.locator('option[value="FORCE_SETTLE"]')).toHaveCount(1)
 })
 
 test('관리자 강제 정산은 노쇼를 포함한 cohort를 한 번만 완료한다', async ({ page }) => {

@@ -164,7 +164,8 @@ async function submitSettlement(input: { tripId: string; submittedBy: string }) 
   const pool = database()
   const client = await pool.connect()
   try {
-    return await client.query(
+    await client.query('BEGIN')
+    const settlement = await client.query(
       `INSERT INTO trip_settlements (
          trip_id, actual_fare, participant_count, final_share, submitted_by,
          fare_submission_idempotency_key, confirmation_deadline, cohort_basis
@@ -173,6 +174,23 @@ async function submitSettlement(input: { tripId: string; submittedBy: string }) 
        RETURNING submitted_by`,
       [input.tripId, input.submittedBy, randomUUID()],
     )
+    // An escrow-confirmed settlement always snapshots its fixed cohort. Keep
+    // this direct fixture consistent with the production submission boundary.
+    await client.query(
+      `INSERT INTO trip_settlement_participants (
+         trip_id, user_id, deposit_amount, final_share
+       )
+       SELECT $1, d.user_id, d.amount, s.final_share
+       FROM trip_deposits d
+       JOIN trip_settlements s ON s.trip_id = d.trip_id
+       WHERE d.trip_id = $1`,
+      [input.tripId],
+    )
+    await client.query('COMMIT')
+    return settlement
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
   } finally {
     client.release()
     await pool.end()

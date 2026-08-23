@@ -2899,11 +2899,6 @@ export async function submitActualFare(input: {
       `UPDATE trip_groups SET status = 'SETTLEMENT_PENDING' WHERE trip_id = $1`,
       [input.tripId],
     )
-    await client.query(
-      `INSERT INTO fare_confirmations (trip_id, user_id, idempotency_key)
-       VALUES ($1, $2, $3)`,
-      [input.tripId, input.actorId, input.idempotencyKey],
-    )
   })
 }
 

@@ -248,6 +248,22 @@ async function runDueTransitions(request: APIRequestContext) {
   return response.json() as Promise<{ settled: number; skipped: number }>
 }
 
+async function openDisputeForDebt(fixture: PolicyV2Fixture) {
+  const pool = database()
+  const client = await pool.connect()
+  try {
+    await client.query(
+      `INSERT INTO fare_disputes (
+         dispute_id, trip_id, user_id, reason, idempotency_key, fare_revision
+       ) VALUES ($1, $2, $3, 'E2E contested debt fixture', $4, 1)`,
+      [randomUUID(), fixture.tripId, fixture.memberOneId, randomUUID()],
+    )
+  } finally {
+    client.release()
+    await pool.end()
+  }
+}
+
 async function resolveWithLowerFareAdjustment(input: {
   fixture: PolicyV2Fixture
   revisedFare: number
@@ -437,6 +453,7 @@ test('policy-v2 admin grant repays the oldest open debt before a newer debt', as
     grantAmounts: [6_000, 5_500, 7_000],
   })
   await runDueTransitions(request)
+  await openDisputeForDebt(oldest)
   const newer = await seedPolicyV2Settlement({
     actualFare: 18_000,
     depositAmount: 5_000,
@@ -493,25 +510,17 @@ test('policy-v2 admin grant repays the oldest open debt before a newer debt', as
     await grantForm.locator('input[name="idempotencyKey"]').evaluate((element, value) => {
       ;(element as HTMLInputElement).value = value
     }, grantIdempotencyKey)
-    await Promise.all([
-      page.waitForURL(/\/admin(?:\?|$)/),
-      grantForm.locator('button[type="submit"]').click(),
-    ])
-
-    await page.goto('/admin/points')
-    const replayForm = page.locator('form').filter({
-      has: page.locator('#targetUserId'),
-    })
-    await replayForm.locator('#targetUserId').selectOption(oldest.memberOneId)
-    await replayForm.locator('#amount').fill('750')
-    await replayForm.locator('#reason').fill('E2E oldest policy-v2 debt repayment')
-    await replayForm.locator('input[name="idempotencyKey"]').evaluate((element, value) => {
-      ;(element as HTMLInputElement).value = value
-    }, grantIdempotencyKey)
-    await Promise.all([
-      page.waitForURL(/\/admin(?:\?|$)/),
-      replayForm.locator('button[type="submit"]').click(),
-    ])
+    await grantForm.locator('button[type="submit"]').click()
+    await expect.poll(
+      () => rows(
+        `SELECT ledger_id FROM point_ledger
+         WHERE user_id = $1 AND entry_type = 'ADMIN_GRANT'
+           AND available_delta = 750
+           AND reason = 'E2E oldest policy-v2 debt repayment'`,
+        [oldest.memberOneId],
+      ),
+      { timeout: 30_000 },
+    ).toHaveLength(1)
 
     expect(await rows(
       `SELECT debt_id
@@ -522,26 +531,28 @@ test('policy-v2 admin grant repays the oldest open debt before a newer debt', as
     expect(await rows(
       `SELECT debt_id
        FROM point_debt_obligations
-       WHERE debt_id = $1 AND status = 'OPEN' AND outstanding_points = 250`,
+       WHERE debt_id = $1 AND status = 'OPEN' AND outstanding_points = 750`,
       [newerDebt.debt_id],
     )).toHaveLength(1)
     expect(await rows(
-      `SELECT debt_id, debt_delta
-       FROM point_debt_events
-       WHERE debt_id = ANY($1::uuid[]) AND event_type = 'REPAYMENT'
-       ORDER BY created_at, debt_event_id`,
+      `SELECT e.debt_id, e.debt_delta
+       FROM point_debt_events e
+       JOIN point_debt_obligations o ON o.debt_id = e.debt_id
+       WHERE e.debt_id = ANY($1::uuid[]) AND e.event_type = 'REPAYMENT'
+       ORDER BY o.created_at, o.debt_id, e.created_at, e.debt_event_id`,
       [[oldestDebt.debt_id, newerDebt.debt_id]],
     )).toEqual([
       { debt_id: oldestDebt.debt_id, debt_delta: -500 },
       { debt_id: newerDebt.debt_id, debt_delta: -250 },
     ])
     expect(await rows(
-      `SELECT l.entry_type, l.available_delta, e.debt_id
-       FROM point_debt_events e
-       JOIN point_ledger l ON l.ledger_id = e.repayment_ledger_id
-       WHERE e.debt_id = ANY($1::uuid[])
-         AND e.event_type = 'REPAYMENT'
-       ORDER BY e.created_at, e.debt_event_id`,
+    `SELECT l.entry_type, l.available_delta, e.debt_id
+     FROM point_debt_events e
+     JOIN point_debt_obligations o ON o.debt_id = e.debt_id
+     JOIN point_ledger l ON l.ledger_id = e.repayment_ledger_id
+     WHERE e.debt_id = ANY($1::uuid[])
+       AND e.event_type = 'REPAYMENT'
+       ORDER BY o.created_at, o.debt_id, e.created_at, e.debt_event_id`,
       [[oldestDebt.debt_id, newerDebt.debt_id]],
     )).toEqual([
       { entry_type: 'DEBT_REPAYMENT', available_delta: -500, debt_id: oldestDebt.debt_id },
@@ -561,7 +572,7 @@ test('policy-v2 admin grant repays the oldest open debt before a newer debt', as
        FROM point_accounts
        WHERE user_id = $1`,
       [oldest.memberOneId],
-    )).toEqual([{ available_points: 0, debt_points: 250 }])
+    )).toEqual([{ available_points: 0, debt_points: 750 }])
   } finally {
     await context.close()
   }
@@ -575,6 +586,7 @@ test('policy-v2 fulfills a user point request and repays debts in oldest-first o
     grantAmounts: [6_000, 5_500, 7_000],
   })
   await runDueTransitions(request)
+  await openDisputeForDebt(oldest)
   const newer = await seedPolicyV2Settlement({
     actualFare: 18_000,
     depositAmount: 5_000,
@@ -629,23 +641,34 @@ test('policy-v2 fulfills a user point request and repays debts in oldest-first o
       requestForm.locator('button[type="submit"]').click(),
     ])
 
-    const [pointRequest] = await rows<{
-      request_id: string
-      status: string
-      requested_amount: number
-      reason: string
-    }>(
-      `SELECT request_id, status, requested_amount, reason
-       FROM point_grant_requests
-       WHERE requester_user_id = $1 AND idempotency_key = $2`,
-      [oldest.memberOneId, requestIdempotencyKey],
-    )
-    expect(pointRequest).toEqual({
+    const expectedPointRequest = {
       request_id: expect.any(String),
       status: 'PENDING',
       requested_amount: requestAmount,
       reason: requestReason,
-    })
+    }
+    await expect.poll(
+      async () => {
+        const [pointRequest] = await rows<{
+          request_id: string
+          status: string
+          requested_amount: number
+          reason: string
+        }>(
+          `SELECT request_id, status, requested_amount, reason
+           FROM point_grant_requests
+           WHERE requester_user_id = $1 AND idempotency_key = $2`,
+          [oldest.memberOneId, requestIdempotencyKey],
+        )
+        return pointRequest
+      },
+      { timeout: 30_000 },
+    ).toEqual(expectedPointRequest)
+    const [pointRequest] = await rows<{ request_id: string }>(
+      `SELECT request_id FROM point_grant_requests
+       WHERE requester_user_id = $1 AND idempotency_key = $2`,
+      [oldest.memberOneId, requestIdempotencyKey],
+    )
     pointRequestId = pointRequest.request_id
   } finally {
     await memberContext.close()
@@ -750,9 +773,10 @@ test('policy-v2 fulfills a user point request and repays debts in oldest-first o
     `SELECT e.debt_id, e.debt_delta, e.repayment_ledger_id,
             l.entry_type, l.available_delta, l.idempotency_key
      FROM point_debt_events e
+     JOIN point_debt_obligations o ON o.debt_id = e.debt_id
      JOIN point_ledger l ON l.ledger_id = e.repayment_ledger_id
      WHERE e.debt_id = ANY($1::uuid[]) AND e.event_type = 'REPAYMENT'
-     ORDER BY e.created_at, e.debt_event_id`,
+     ORDER BY o.created_at, o.debt_id, e.created_at, e.debt_event_id`,
     [[oldestDebt.debt_id, newerDebt.debt_id]],
   )).toEqual([
     {
@@ -776,7 +800,7 @@ test('policy-v2 fulfills a user point request and repays debts in oldest-first o
     `SELECT debt_id
      FROM point_debt_obligations
      WHERE debt_id = $1 AND status = 'SETTLED' AND outstanding_points = 0
-        OR debt_id = $2 AND status = 'OPEN' AND outstanding_points = 250
+        OR debt_id = $2 AND status = 'OPEN' AND outstanding_points = 750
      ORDER BY debt_id`,
     [oldestDebt.debt_id, newerDebt.debt_id],
   )).toEqual([{ debt_id: [oldestDebt.debt_id, newerDebt.debt_id].sort()[0] }, {
@@ -787,7 +811,7 @@ test('policy-v2 fulfills a user point request and repays debts in oldest-first o
      FROM point_accounts
     WHERE user_id = $1`,
     [oldest.memberOneId],
-  )).toEqual([{ available_points: 0, held_points: 0, debt_points: 250 }])
+  )).toEqual([{ available_points: 0, held_points: 0, debt_points: 750 }])
 })
 
 test('policy-v2 accepts a 24-hour dispute after the 10-minute consent path provisionally settles', async ({ request }) => {

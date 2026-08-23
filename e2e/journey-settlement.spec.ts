@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { Pool } from '@neondatabase/serverless'
 
 type JourneyFixture = {
@@ -16,6 +16,16 @@ function database() {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) throw new Error('DATABASE_URL is required for E2E tests.')
   return new Pool({ connectionString, max: 1 })
+}
+
+async function runDueTransitions(request: APIRequestContext) {
+  const secret = process.env.CRON_SECRET
+  if (!secret) throw new Error('CRON_SECRET is required for E2E scheduler tests.')
+  const response = await request.get('/api/internal/due-transitions', {
+    headers: { authorization: `Bearer ${secret}` },
+  })
+  expect(response.ok()).toBe(true)
+  return response.json() as Promise<{ settled: number; skipped: number }>
 }
 
 async function seedConfirmedJourney(): Promise<JourneyFixture> {
@@ -182,7 +192,7 @@ async function queryRows<T>(sql: string, values: unknown[]) {
   }
 }
 
-test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상태를 보존한다', async ({ browser }) => {
+test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상태를 보존한다', async ({ browser, request }) => {
   test.setTimeout(120_000)
   const fixture = await seedConfirmedJourney()
   const host = await pageForUser(browser, fixture.hostToken)
@@ -240,8 +250,7 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
       [[fixture.hostId, fixture.memberId, fixture.noShowId]],
     )).toHaveLength(0)
 
-    // Submit a lower actual fare through the host UI. This inserts the host's
-    // confirmation, while the checked-in member and no-show confirm separately.
+    // Every escrow participant, including the host and a no-show, confirms explicitly.
     await host.page.goto(`/room/${fixture.tripId}`)
     const openFareModal = host.page.getByRole('button', { name: '도착' })
     await openFareModal.click()
@@ -276,7 +285,7 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
     expect(await queryRows(
       `SELECT user_id FROM fare_confirmations WHERE trip_id = $1`,
       [fixture.tripId],
-    )).toEqual([{ user_id: fixture.hostId }])
+    )).toEqual([])
     expect(await queryRows(
       `SELECT user_id, deposit_amount, final_share
        FROM trip_settlement_participants WHERE trip_id = $1 ORDER BY user_id`,
@@ -287,7 +296,7 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
       { user_id: fixture.noShowId, deposit_amount: 5000, final_share: 4000 },
     ]))
 
-    for (const participant of [member, noShow]) {
+    for (const participant of [host, member, noShow]) {
       await participant.page.goto(`/room/${fixture.tripId}/settle`)
       const confirmFare = participant.page.getByRole('button', {
         name: '실제 요금에 동의',
@@ -297,44 +306,38 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
       await expect(confirmFare).toHaveCount(0, { timeout: 30_000 })
     }
 
-    expect(await queryRows(
-      `SELECT user_id FROM fare_confirmations WHERE trip_id = $1 ORDER BY user_id`,
-      [fixture.tripId],
-    )).toEqual([
+    const expectedConfirmations = [
       fixture.hostId,
       fixture.memberId,
       fixture.noShowId,
-    ].sort().map((user_id) => ({ user_id })))
-
-    await host.page.goto(`/room/${fixture.tripId}/settle`)
-    const settleTrip = host.page.getByRole('button', { name: '최종 정산 실행' })
-    await expect(settleTrip).toHaveCount(1)
-    await settleTrip.click()
-    await expect(host.page).toHaveURL(
-      new RegExp(`/room/${fixture.tripId}/settle/complete`),
+    ].sort().map((user_id) => ({ user_id }))
+    await expect.poll(
+      () => queryRows(
+        `SELECT user_id FROM fare_confirmations WHERE trip_id = $1 ORDER BY user_id`,
+        [fixture.tripId],
+      ),
       { timeout: 30_000 },
-    )
-    await expect(host.page.getByText('12,000P')).toBeVisible()
-    await expect(host.page.getByText('4,000P', { exact: true })).toBeVisible()
+    ).toEqual(expectedConfirmations)
 
-    const [completed] = await queryRows<{
+    const dueTransitions = await runDueTransitions(request)
+    expect(dueTransitions.settled).toBeGreaterThanOrEqual(1)
+
+    const [provisional] = await queryRows<{
       status: string
       settlement_mode: string
-      settled_by_user_id: string
     }>(
-      `SELECT status, settlement_mode, settled_by_user_id
+      `SELECT status, settlement_mode
        FROM trip_settlements WHERE trip_id = $1`,
       [fixture.tripId],
     )
-    expect(completed).toEqual({
-      status: 'COMPLETED',
-      settlement_mode: 'HOST',
-      settled_by_user_id: fixture.hostId,
+    expect(provisional).toEqual({
+      status: 'PROVISIONALLY_SETTLED',
+      settlement_mode: 'SYSTEM_PROVISIONAL',
     })
     expect(await queryRows(
       `SELECT status FROM trip_groups WHERE trip_id = $1`,
       [fixture.tripId],
-    )).toEqual([{ status: 'COMPLETED' }])
+    )).toEqual([{ status: 'SETTLEMENT_PENDING' }])
     expect(await queryRows(
       `SELECT user_id, status FROM trip_participants WHERE trip_id = $1 ORDER BY user_id`,
       [fixture.tripId],
@@ -342,7 +345,10 @@ test('확정·예치 cohort는 브라우저 여정에서 체크인·노쇼 상�
       fixture.hostId,
       fixture.memberId,
       fixture.noShowId,
-    ].sort().map((user_id) => ({ user_id, status: 'COMPLETED' })))
+    ].sort().map((user_id) => ({
+      user_id,
+      status: user_id === fixture.noShowId ? 'NO_SHOW' : 'CHECKED_IN',
+    })))
     expect(await queryRows(
       `SELECT user_id, entry_type, available_delta, held_delta
        FROM point_ledger

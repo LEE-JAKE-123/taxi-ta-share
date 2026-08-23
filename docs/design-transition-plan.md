@@ -1,319 +1,88 @@
-# TaxiTaShare 디자인 톤앤매너 전환 계획
+# TaxiTaShare 디자인 톤앤매너 전환 계획 — Premium Mobility v2
 
 - 기준 문서: `docs/design.md`
-- 작성일: 2026-07-30
-- 상태: Design 0 완료, Design 1 진행 중
+- 작성일: 2026-08-23
 - 제품 요구사항 기준: `docs/prd.md`
 - 관련 요구사항: `FR-01~05`, `FR-10~22`, `FR-30~40`, `FR-50~55`, 접근성·위치정보·신뢰성 비기능 요구사항
 
-## 1. 목표
-
-TaxiTaShare의 전체 UI를 저밀도, 단일 액센트, 명확한 면 대비, 절제된
-타이포그래피를 사용하는 하나의 디자인 언어로 전환한다. Apple의 제품
-사진 중심 표현을 그대로 모사하지 않고, TaxiTaShare에서는 실제 지도,
-경로, 시간, 인원, 요금 및 상태 정보를 화면의 주인공으로 삼는다.
-
-전환 후 사용자는 모든 화면에서 다음을 일관되게 경험해야 한다.
-
-- 흰색·파치먼트·니어블랙 면이 만드는 명확한 정보 리듬
-- Action Blue 하나로 통일된 일반 상호작용
-- 17px 본문과 600 굵기 중심의 조용하고 읽기 쉬운 위계
-- pill 형태의 핵심 CTA와 44px 이상의 터치 영역
-- 카드·버튼의 장식 그림자를 제거한 평평한 인터페이스
-- 지도·요금·정산·경고 상태가 장식이 아닌 근거와 문구로 전달되는 화면
-- 모바일 우선이되 데스크톱에서 430px 프레임에 갇히지 않는 반응형 레이아웃
-
-## 2. 기준 해석과 제품 적용 원칙
-
-### 그대로 채택
-
-- 일반 상호작용 색상은 `#0066cc` 하나로 통일한다.
-- 밝은 화면은 `#ffffff`와 `#f5f5f7`, 어두운 강조 면은 `#272729`를
-  기본으로 사용한다.
-- 카드와 버튼에는 장식용 그림자를 사용하지 않는다.
-- 제목은 600 굵기와 좁은 자간, 본문은 17px/400을 기본으로 한다.
-- 핵심 CTA, 검색 입력과 선택 칩에는 pill 문법을 사용한다.
-- 구조 간격은 8px 계열을 따르고 콘텐츠 블록 사이에 충분한 여백을 둔다.
-- 버튼 pressed 상태는 `scale(0.95)`로 통일한다.
-- 모든 핵심 터치 대상은 최소 44×44px를 유지한다.
-
-### TaxiTaShare에 맞게 변환
-
-- 제품 사진 대신 지도, 경로, 예상 요금, 확정 인원과 정산 결과를 주요
-  시각 콘텐츠로 취급한다.
-- 홈은 쇼핑형 제품 타일 대신 `추천 경로 → 모집 방 → 포인트` 순서의
-  서비스 타일 리듬을 사용한다.
-- 모바일 탭 바는 유지하되 그림자와 노란 플로팅 버튼을 제거하고
-  frosted navigation과 Action Blue 활성 상태로 단순화한다.
-- 상태 배지는 색상만 쓰지 않고 항상 상태명·아이콘·보조 문구를 함께 쓴다.
-- 오류, 위험, 성공 색은 일반 CTA용 두 번째 액센트가 아니라 의미론적
-  피드백 토큰으로만 허용한다.
-
-### 채택하지 않음
-
-- Apple 로고, 제품명, 카피, 사진 구성 또는 고유 브랜드 자산을 복제하지 않는다.
-- SF Pro 웹폰트를 별도 배포하지 않는다. Apple 기기에서는 시스템 글꼴을
-  사용하고, 그 외 환경은 Inter 또는 현재 한국어 시스템 글꼴의 품질을
-  비교한 뒤 합법적인 대체 글꼴을 사용한다.
-- 실제 서비스 정보보다 분위기 이미지를 우선하지 않는다.
-- 어두운 전체 테마를 추가하지 않는다. 어두운 면은 핵심 정보나 완료
-  결과를 강조하는 제한된 섹션에만 사용한다.
-
-## 3. 현재 구현과의 차이
-
-| 영역 | 현재 | 목표 | 우선도 |
-|---|---|---|---|
-| 색상 | 택시 옐로우, 민트, 블루가 상호작용에 혼용됨 | 일반 상호작용은 Action Blue 하나 | P0 |
-| 타이포 | 12~16px, 700/800 사용 빈도가 높음 | 본문 17px, 제목 600 중심 | P0 |
-| 카드 | 대부분 `rounded-2xl + border + shadow-sm` | 면 대비 또는 hairline, 그림자 없음 | P0 |
-| 버튼 | 사각/라운드/플로팅 문법 혼재 | primary/secondary pill과 utility rect | P0 |
-| 레이아웃 | 모든 화면이 최대 430px 모바일 프레임 | 모바일 우선 + 태블릿/데스크톱 확장 | P1 |
-| 내비게이션 | 상단바와 하단 탭의 시각 문법이 다름 | frosted navigation 계열로 통일 | P0 |
-| 상태 표현 | 민트·노랑·파랑 배지 의존 | 텍스트·아이콘·의미 토큰 조합 | P0 |
-| 페이지 구성 | 작은 카드가 연속되는 고밀도 구조 | 큰 정보 면과 여백 중심의 저밀도 구조 | P1 |
-| 지도 | 카드 내부 보조 요소 | 경로 화면의 주요 시각 콘텐츠 | P1 |
-| 구현 방식 | 페이지별 Tailwind 문자열 중복 | 토큰과 공통 variant를 통한 강제 | P0 |
-
-## 4. 목표 디자인 토큰
-
-실제 값은 1단계 구현에서 `app/globals.css`에 정의하고 컴포넌트에서는
-의미 토큰만 사용한다.
-
-### 색상
-
-- `--canvas`: `#ffffff`
-- `--canvas-parchment`: `#f5f5f7`
-- `--surface-dark`: `#272729`
-- `--surface-black`: `#000000`
-- `--ink`: `#1d1d1f`
-- `--ink-muted`: `#7a7a7a`
-- `--action`: `#0066cc`
-- `--action-focus`: `#0071e3`
-- `--action-on-dark`: `#2997ff`
-- `--hairline`: `#e0e0e0`
-- `--danger`, `--warning`, `--success`: 피드백 전용 WCAG 대비 충족 색상
-
-금지 사항:
-
-- 컴포넌트나 페이지에 직접 hex 값을 쓰지 않는다.
-- 일반 링크와 CTA에 성공·경고 색을 쓰지 않는다.
-- 장식용 gradient를 추가하지 않는다.
-
-### 타이포그래피
-
-한국어 가독성을 고려해 다음 모바일 축소형 위계를 먼저 적용한다.
-
-- Hero: 34px/600/1.12, `letter-spacing: -0.02em`
-- Display: 28px/600/1.18, `letter-spacing: -0.018em`
-- Section: 21px/600/1.25, `letter-spacing: -0.012em`
-- Body: 17px/400/1.44, `letter-spacing: -0.01em`
-- Body Strong: 17px/600/1.35
-- Caption: 14px/400/1.43
-- Fine Print: 12px/400/1.35
+## 1. 목표와 범위
 
-`font-bold`, `font-extrabold`를 관성적으로 사용하지 않는다. 금액, 긴급
-상태 또는 한 화면의 핵심 결과처럼 명확한 이유가 있을 때만 700을 허용한다.
+기존의 Apple-inspired 단일 블루 문법을 Premium Mobility 시각 언어로 전환한다. 딥 포레스트, 쿨 아이보리, 포레스트 에메랄드, 제한적인 세이지 포인트를 사용하고 지도·경로·시간·인원·요금·정산 결과가 디자인의 중심이 되게 한다.
 
-### 형태와 깊이
+이 작업은 UI 표현과 공통 컴포넌트의 변경이다. 모집/참여 상태 전이, 권한, 포인트 원장, 정산 계산, 지도·AI 추천의 근거와 서버 검증은 변경하지 않는다.
 
-- Hero/section tile: radius 0
-- Utility card: 18px
-- Utility button: 8px
-- Secondary capsule: 11px
-- Primary CTA/search/filter: pill
-- 카드·버튼·텍스트 shadow: 금지
-- sticky navigation: hairline + `backdrop-filter`
-- 지도/영수증 등 실제 콘텐츠의 깊이 표현만 제한적으로 허용
+| 영역 | 새 기준 | 우선도 |
+|---|---|---|
+| 주요 색상 | `#2F6B57` Forest Emerald, `#12231D` Deep Forest | P0 |
+| 기본 면 | `#F7F8F5` canvas + white surface | P0 |
+| CTA | 48px 높이, 14px radius, brand 색 | P0 |
+| 카드 | 18~22px radius, hairline, 기본 shadow 없음 | P0 |
+| 홈 | dark route hero + 추천 모집 + 포인트 요약 | P0 |
+| 지도 | 대표 시각 콘텐츠, 모바일 map-first | P0 |
+| AI 추천 | brand-soft 정보 블록과 계산 근거 | P1 |
+| 데스크톱 | 지도와 정보 패널 2열 구성 | P1 |
 
-## 5. 공통 컴포넌트 전환
+기존 `--action: #0066cc`, `--action-focus`, `--action-on-dark`, 택시 옐로우·민트 CTA/배지 토큰은 deprecated로 처리한다. 짧은 호환 기간 alias는 허용하되 신규 화면·컴포넌트는 새 토큰만 사용한다.
 
-### P0 기반 컴포넌트
+## 2. 적용 원칙
 
-1. `app/globals.css`
-   - 기존 yellow/mint 중심 토큰을 새 의미 토큰으로 교체한다.
-   - 타이포, 간격, radius, focus ring을 한곳에서 정의한다.
-   - 기존 이름은 한 단계 동안 새 토큰의 alias로 유지해 점진적으로 전환한다.
-2. `components/ui/button.tsx`, `components/bottom-bar.tsx`
-   - primary pill, secondary pill, dark utility, destructive의 네 문법으로 정리한다.
-   - 높이 44px 이상, focus outline 2px, pressed scale 0.95를 보장한다.
-3. `components/ui/card.tsx`
-   - 기본 shadow를 제거한다.
-   - `flat`, `hairline`, `parchment`, `dark` variant를 제공한다.
-4. `components/top-bar.tsx`, `components/tab-bar.tsx`
-   - frosted surface, hairline, 단일 blue 활성 상태로 통일한다.
-   - 가운데 플로팅 CTA는 일반 탭 또는 명확한 pill CTA로 전환한다.
-5. `components/status-badge.tsx`
-   - 일반 강조와 업무 상태를 분리한다.
-   - 상태별 레이블·아이콘·보조 설명 API를 정의한다.
-6. 입력·빈 상태·오류 상태
-   - 검색은 pill, 일반 form control은 44px 높이와 11px radius를 사용한다.
-   - 오류는 색상뿐 아니라 제목, 원인, 다음 행동을 제공한다.
+1. `docs/prd.md`의 기능·안전·금액 요구사항이 시각적 모사보다 우선한다.
+2. `docs/design.md`의 토큰과 variant를 재사용하며 페이지별 임의 색상, radius, shadow를 추가하지 않는다.
+3. full pill은 상태 배지·필터 칩·짧은 선택자에만 남기고 CTA는 14px radius로 통일한다.
+4. 기본 깊이는 surface 차이와 hairline으로 만들며 floating layer에만 soft shadow를 허용한다.
+5. 지도와 실제 경로·금액 수치가 장식·AI 마케팅 표현보다 먼저 읽혀야 한다.
+6. 상태는 텍스트와 색상을 함께 제공하고, 모바일 한 손 조작·키보드·포커스·44px 터치 영역을 보장한다.
+7. 834px 이상에서는 모바일 프레임을 확대하지 않고 정보와 지도를 병렬 배치한다.
 
-### 컴포넌트 사용 규칙
+## 3. 작업 순서
 
-- 페이지에서 새로운 버튼 스타일을 직접 조합하지 않는다.
-- 공통 variant로 표현할 수 없으면 먼저 디자인 문서와 컴포넌트를 갱신한다.
-- 모든 공통 컴포넌트는 default, pressed, focus, disabled, loading,
-  error 또는 empty 중 관련 상태를 명시한다.
-- 컴포넌트 변경은 홈 한 화면에서 검증한 뒤 전체 화면에 확산한다.
+### Design 0 — Token Reset
 
-## 6. 페이지별 전환 순서
+대상: `app/globals.css`, theme variables, Tailwind 토큰. Premium palette, typography, radius, focus ring을 정의하고 blue/yellow/mint legacy 토큰과 기본 card shadow를 정리한다.
 
-### 1단계: 디자인 기반과 대표 화면
+### Design 1 — Base Components
 
-대상:
+대상: Button, Card, Input, StatusBadge, TopBar, BottomNavigation. CTA 14px radius, selected/dark/brand-soft/semantic variant, navigation의 focus 상태를 통일한다.
 
-- `/`
-- `/signup`
-- `/home`
-- 공통 navigation, button, card, input, status
+### Design 2 — Home & Room Cards
 
-목표:
+대상: `/home`, 모집 카드, AI recommendation block. dark route hero와 route line을 도입하고 비용·인원 정보 위계와 추천 근거를 개선한다.
 
-- 새 토큰이 실제 사용자 첫 흐름에서 성립하는지 확인한다.
-- 홈의 지도·추천·모집 정보를 큰 면 단위로 재구성한다.
-- 한 화면 안에서 white → parchment → dark의 면 리듬을 검증한다.
+### Design 3 — Create & Room Detail
 
-완료 기준:
+대상: `/create`, `/room/[id]`, `/my-rooms`. step flow, map-first 모바일 구조, desktop 2-column, sticky action/summary와 grouped list를 적용한다.
 
-- yellow/mint 일반 CTA가 남지 않는다.
-- 카드 그림자가 없다.
-- 본문 기본 크기가 17px이다.
-- 키보드 focus와 44px 터치 영역을 확인한다.
-
-### 2단계: 핵심 이동·모집 흐름
+### Design 4 — Gathering & Settlement
 
-대상:
+대상: gathering, `/points`, settlement. live status header, point summary, dark settlement result와 위험 행동 확인 흐름을 적용한다.
 
-- `/create`
-- `/room/[id]`
-- `/my-rooms`
-- confirm/gathering
-
-목표:
-
-- 지도와 예상 요금을 주요 콘텐츠로 승격한다.
-- 단계별 입력을 저밀도 section으로 나눈다.
-- 모집 상태와 참여 행동의 위계를 명확히 한다.
-
-완료 기준:
-
-- 장소 검색, 지도, 시간, 인원, 예상 요금, CTA의 읽기 순서가 명확하다.
-- 로딩·경로 없음·요금 없음·API 오류 상태가 동일한 문법을 사용한다.
-- 모집 상태를 색상 없이도 이해할 수 있다.
-
-### 3단계: 포인트·정산·관리자
-
-대상:
-
-- `/points`
-- `/room/[id]/settle`
-- `/room/[id]/settle/complete`
-- `/admin`
-
-목표:
-
-- 숫자 정보는 조용한 타이포와 정렬로 강조한다.
-- 지급·예치·환불·추가 차감은 의미색과 부호, 거래 유형 문구를 함께 쓴다.
-- 위험 작업은 일반 Action Blue와 분리된 명시적 확인 단계를 둔다.
-
-완료 기준:
-
-- 금액과 잔액의 전후 관계를 한 번에 이해할 수 있다.
-- 관리자 작업과 사용자 작업이 시각적으로 구분된다.
-- 의미색이 장식이나 일반 CTA로 사용되지 않는다.
-
-### 4단계: 반응형·접근성·회귀 정리
-
-대상: 전체 페이지
-
-- 390px, 430px, 640px, 834px, 1068px 기준을 검증한다.
-- 640px 이상에서는 고정 430px 프레임을 완화하고 콘텐츠 특성에 맞는
-  max-width와 grid를 사용한다.
-- 200% 확대, 키보드 탐색, focus 순서, reduced motion, 명도 대비를 확인한다.
-- 페이지에 남은 직접 색상·shadow·임의 radius·중복 버튼 조합을 제거한다.
-
-## 7. 구현 스프린트 제안
-
-### 진행 기록 (2026-08-23)
-
-- **Design 0 완료:** `app/globals.css`의 의미 토큰과 이전 토큰 alias,
-  Button/Card/BottomBar/TabBar/StatusBadge 공통 variant를 적용했다.
-  중앙 플로팅 CTA는 일반 탭으로 전환했고, 핵심 조작의 44px 최소 높이와
-  focus/pressed 상태를 공통 컴포넌트에서 보장한다.
-- **Design 1 진행 중:** `/`, `/signup`, `/home`의 첫 흐름에 새 타이포·터치
-  영역·focus 규칙을 적용했다. 추천·모집 카드의 저밀도 면 구성과 첫 화면의
-  전체 상태 회귀는 다음 작업으로 남아 있다.
-- 이 전환에서는 모집·참여·포인트·정산 로직과 데이터베이스를 변경하지 않았다.
-
-| 스프린트 | 범위 | 산출물 | 예상 규모 |
-|---|---|---|---|
-| Design 0 | 토큰·컴포넌트 계약 | 토큰 표, Button/Card/Input/Nav variants | 1~2일 |
-| Design 1 | 랜딩·가입·홈 | 대표 화면 3개와 상태 회귀 | 2~3일 |
-| Design 2 | 생성·방·집결 | 지도 중심 핵심 흐름 | 3~4일 |
-| Design 3 | 포인트·정산·관리자 | 금융 유사 정보와 위험 상태 | 3~4일 |
-| Design 4 | 전체 회귀 | 반응형·접근성·시각 부채 제거 | 2~3일 |
-
-각 스프린트는 독립 배포가 가능해야 하며, 기능 로직·권한·원장·상태 전이를
-디자인 전환과 동시에 변경하지 않는다.
-
-## 8. 검증 기준
-
-### 자동 검증
-
-- `pnpm lint`
-- `pnpm exec tsc --noEmit`
-- `pnpm test`
-- `pnpm build`
-- 향후 토큰 안정화 후 금지 패턴 검사:
-  - 페이지 직접 hex
-  - `shadow-*`의 비허용 사용
-  - 공통 CTA의 직접 Tailwind 조합
-  - 44px 미만의 핵심 터치 대상
-
-### 시각·상호작용 검증
-
-- 모바일 390×844, 430×932
-- 태블릿 834px
-- 데스크톱 1068px 이상
-- light surface와 dark surface 각각의 focus 대비
-- 한국어 긴 장소명, 큰 금액, 4명 상태, 오류 메시지 줄바꿈
-- 지도 SDK 로딩/실패, 장소 없음, 요금 없음, 네트워크 재시도
-- 포인트 부족, 정산 이의제기, 관리자 지급 실패
-
-### 수용 기준
-
-- 일반 상호작용의 액센트는 Action Blue 하나다.
-- 페이지의 시각적 위계가 shadow 없이 성립한다.
-- 모든 핵심 행동은 44px 이상이며 키보드 focus가 보인다.
-- 색상을 제거해도 상태와 다음 행동을 이해할 수 있다.
-- 공통 컴포넌트 밖에서 새 디자인 문법을 임의로 만들지 않는다.
-- 실제 데이터와 상태가 디자인보다 우선하며 기능 회귀가 없다.
-
-## 9. 향후 유지 규칙
-
-1. `docs/prd.md`는 제품·기능 요구사항의 최상위 기준이다.
-2. `docs/design.md`는 시각 언어와 톤앤매너의 최상위 기준이다.
-3. 이 문서는 TaxiTaShare 적용 순서와 예외를 정의한다.
-4. 충돌 시 접근성, 안전, 정확한 상태·금액 표현을 시각적 모사보다 우선한다.
-5. 새 화면은 기존 토큰과 공통 컴포넌트를 먼저 재사용한다.
-6. 새 토큰 또는 variant가 필요하면 코드보다 먼저 `docs/design.md` 또는
-   이 계획의 결정 기록을 갱신한다.
-7. 디자인 변경 완료 보고에는 변경한 토큰·컴포넌트·페이지, 접근성 검증,
-   남은 예외를 포함한다.
-8. 이미지 자산이 필요하면 목적, 라이선스, 반응형 crop과 대체 텍스트를
-   먼저 정의한다.
-
-## 10. 열린 결정
-
-- 비 Apple 환경의 한국어 기본 글꼴을 Inter 계열과 현재 Noto Sans KR 중
-  무엇으로 확정할지
-- 데스크톱에서 모바일 앱 프레임을 완전히 제거할지, 일부 업무 흐름에만
-  유지할지
-- 홈 dark tile의 대상 정보를 추천, 포인트 또는 안전 안내 중 무엇으로 할지
-- 지도 자체의 색조를 기본 Kakao 스타일로 유지할지 별도 스타일을 둘지
-- 브랜드 로고의 기존 taxi yellow를 폐기할지, 비상호작용 브랜드 자산에만
-  제한적으로 유지할지
-- semantic success/warning/danger의 최종 대비 색상
-
-위 항목은 Design 0에서 화면 시안과 접근성 대비를 비교한 뒤 확정한다.
+### Design 5 — Admin & Regression
+
+대상: `/admin`, 전체 화면. 관리자 navigation 분리, 반응형·접근성 회귀, deprecated 토큰 제거를 수행한다.
+
+각 단계는 기능 로직 변경 없이 독립적으로 검증·배포 가능해야 한다.
+
+## 4. 검증과 수용 기준
+
+```powershell
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm test
+pnpm build
+```
+
+390×844, 430×932, 640, 834, 1068, 1280px 이상에서 시각 검증한다. 모집 중·출발 임박·모집 실패, 포인트 부족, AI 추천 없음, 지도 로딩/실패/경로 없음, 정산 대기/이의제기/완료, 관리자 지급 실패 상태를 함께 점검한다.
+
+- CTA가 forest emerald 계열로 일관되고 taxi yellow와 bright blue가 일반 상호작용에서 제거된다.
+- full-pill은 필터·상태 중심으로 제한되고 shadow 없이도 정보 위계가 성립한다.
+- 홈의 route hero와 모집 카드의 출발지·도착지·시간·인원·금액을 빠르게 파악할 수 있다.
+- 정산 결과가 일반 화면과 구분되고 상태를 색상 없이도 이해할 수 있다.
+- 모바일과 데스크톱이 단순 확대가 아니며 기능·DB·권한·포인트 원장 흐름은 바뀌지 않는다.
+
+## 5. 유지 규칙과 열린 결정
+
+- 세이지는 추가 CTA 색으로 확장하지 않는다. 새 radius와 shadow는 `docs/design.md`에 근거가 있을 때만 추가한다.
+- 신규 페이지는 공통 토큰과 component variant를 먼저 사용한다.
+- 브랜드 로고의 세이지 포인트 사용 여부, 지도 제공자·marker 방식, 랜딩 route hero의 지도 crop/abstract route, Pretendard 직접 포함 여부는 별도 결정이 필요하다.
+
+**전체 화면이 쿨 아이보리, 딥 포레스트, 포레스트 에메랄드 중심으로 통일되고 지도·경로·시간·요금이 디자인의 중심에 놓이며, 모바일과 데스크톱 각각에 맞는 프리미엄 모빌리티 UI로 동작하면 전환을 완료한 것으로 본다.**

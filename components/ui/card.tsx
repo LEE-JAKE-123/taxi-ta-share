@@ -4,10 +4,14 @@ import { cva, type VariantProps } from 'class-variance-authority'
 const cardVariants = cva('rounded-[18px] p-5', {
   variants: {
     variant: {
-      flat: 'bg-card text-card-foreground',
-      hairline: 'border border-hairline bg-card text-card-foreground',
-      parchment: 'bg-canvas-parchment text-ink',
+      flat: 'bg-surface text-card-foreground',
+      surface: 'border border-hairline bg-surface text-card-foreground',
+      hairline: 'border border-hairline bg-surface text-card-foreground',
+      subtle: 'bg-surface-subtle text-ink',
+      parchment: 'bg-surface-subtle text-ink',
+      selected: 'border border-primary bg-brand-soft text-ink',
       dark: 'bg-surface-dark text-white',
+      interactive: 'border border-hairline bg-surface text-card-foreground transition-colors hover:border-primary/50 hover:bg-surface-subtle',
     },
   },
   defaultVariants: {

@@ -13,8 +13,8 @@ export function RoomCard({ room }: { room: Room }) {
   return (
     <Card
       className={cn(
-        'flex flex-col gap-3',
-        closed && 'border-border bg-muted/45',
+        'flex flex-col gap-5',
+        closed && 'border-hairline bg-surface-subtle/70',
       )}
       aria-label={`${closed ? '모집 마감' : '모집 중'} 방`}
     >
@@ -34,7 +34,7 @@ export function RoomCard({ room }: { room: Room }) {
         </StatusBadge>
       </div>
 
-      <div className="flex items-center gap-2 text-lg font-bold">
+      <div className="flex items-center gap-2 text-lg font-semibold text-ink">
         <span>{room.origin}</span>
         <ArrowRight className="size-4 text-muted-foreground" />
         <span>{room.destination}</span>
@@ -52,22 +52,22 @@ export function RoomCard({ room }: { room: Room }) {
       </div>
 
       {/* AI 추천 이유 */}
-      <div className="rounded-xl bg-info-soft p-3">
-        <div className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-info">
+      <div className="rounded-[14px] border border-brand/10 bg-brand-soft p-4">
+        <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-brand-strong">
           <Sparkles className="size-3.5" />
           AI 추천 이유
         </div>
         <ul className="flex flex-col gap-1 text-xs text-foreground/80">
           <li className="flex items-center gap-1.5">
-            <Navigation className="size-3.5 text-info" />내 출발지에서{' '}
+            <Navigation className="size-3.5 text-brand" />내 출발지에서{' '}
             {room.reason.fromOriginMeters}m
           </li>
           <li className="flex items-center gap-1.5">
-            <Navigation className="size-3.5 text-info" />
+            <Navigation className="size-3.5 text-brand" />
             희망 목적지에서 {room.reason.toDestMeters}m
           </li>
           <li className="flex items-center gap-1.5">
-            <Clock className="size-3.5 text-info" />
+            <Clock className="size-3.5 text-brand" />
             예상 우회 시간 약 {room.reason.detourMinutes}분
           </li>
         </ul>
@@ -76,13 +76,13 @@ export function RoomCard({ room }: { room: Room }) {
       <div className="flex items-center justify-between border-t border-border pt-3">
         <div>
           <p className="text-xs text-muted-foreground">예상 1인 분담금</p>
-          <p className="text-lg font-extrabold text-foreground">
+          <p className="text-lg font-semibold tabular-nums text-foreground">
             {formatPoints(room.perPersonPoints)}
           </p>
         </div>
         <Link
           href={`/room/${room.id}`}
-          className="inline-flex items-center gap-1 rounded-full bg-foreground px-4 py-2.5 text-sm font-bold text-background transition-transform active:scale-95"
+          className="inline-flex items-center gap-1 rounded-[14px] bg-brand px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:bg-brand-strong active:scale-95"
         >
           방 자세히 보기
           <ArrowRight className="size-4" />

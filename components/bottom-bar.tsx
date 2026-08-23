@@ -9,10 +9,10 @@ export function BottomBar({
   className?: string
 }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1068px]">
+    <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1280px]">
       <div
         className={cn(
-          'border-t border-hairline bg-canvas/80 px-5 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 backdrop-blur-xl backdrop-saturate-150',
+          'border-t border-hairline bg-surface/90 px-5 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 backdrop-blur-xl backdrop-saturate-150',
           className,
         )}
       >
@@ -30,19 +30,19 @@ export function BigButton({
   tone?: 'primary' | 'secondary' | 'dark' | 'destructive' | 'foreground' | 'warn' | 'mint' | 'outline'
 }) {
   const tones = {
-    primary: 'rounded-full bg-action text-primary-foreground hover:bg-action/90',
-    secondary: 'rounded-[11px] border border-hairline bg-canvas text-ink hover:bg-canvas-parchment',
-    dark: 'rounded-lg bg-surface-dark text-white hover:bg-surface-black',
-    destructive: 'rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90',
-    foreground: 'rounded-lg bg-surface-dark text-white hover:bg-surface-black',
-    warn: 'rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90',
-    mint: 'rounded-full bg-action text-primary-foreground hover:bg-action/90',
-    outline: 'rounded-[11px] border border-hairline bg-canvas text-ink hover:bg-canvas-parchment',
+    primary: 'rounded-[14px] bg-primary text-primary-foreground hover:bg-action-focus',
+    secondary: 'rounded-[14px] border border-hairline bg-surface text-ink hover:bg-surface-subtle',
+    dark: 'rounded-[14px] bg-surface-dark text-white hover:bg-surface-black',
+    destructive: 'rounded-[14px] bg-destructive text-destructive-foreground hover:bg-destructive/90',
+    foreground: 'rounded-[14px] bg-surface-dark text-white hover:bg-surface-black',
+    warn: 'rounded-[14px] bg-destructive text-destructive-foreground hover:bg-destructive/90',
+    mint: 'rounded-[14px] bg-primary text-primary-foreground hover:bg-action-focus',
+    outline: 'rounded-[14px] border border-hairline bg-surface text-ink hover:bg-surface-subtle',
   }
   return (
     <button
       className={cn(
-        'flex min-h-12 w-full items-center justify-center gap-2 px-6 py-3 text-[17px] font-normal outline-none transition-[transform,background-color,border-color,color] duration-150 motion-reduce:transition-none active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100',
+        'flex min-h-12 w-full items-center justify-center gap-2 px-6 py-3 text-base font-semibold outline-none transition-[transform,background-color,border-color,color] duration-150 motion-reduce:transition-none active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100',
         tones[tone],
         className,
       )}

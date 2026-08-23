@@ -14,8 +14,8 @@ export function MobileShell({
   withTabBar?: boolean
 }) {
   return (
-    <div className="flex min-h-dvh justify-center bg-muted">
-      <div className="relative flex w-full max-w-[1068px] flex-col bg-background">
+    <div className="flex min-h-dvh justify-center bg-canvas lg:px-8">
+      <div className="relative flex w-full max-w-[1280px] flex-col bg-background lg:border-x lg:border-hairline">
         <div
           className={cn(
             'flex min-h-dvh flex-col',

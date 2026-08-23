@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Coins, Info, Plus } from 'lucide-react'
+import { ArrowRight, Compass, Coins, MapPin, Plus, Route } from 'lucide-react'
 import { BrandLogo } from '@/components/brand-logo'
 import { DatabaseRoomCard } from '@/components/database-room-card'
 import { EmptyState } from '@/components/empty-state'
@@ -27,137 +27,92 @@ export default async function HomePage({
 
   return (
     <MobileShell>
-      <header className="flex items-center justify-between px-5 pb-2 pt-6">
+      <header className="flex items-center justify-between px-5 pb-3 pt-6 lg:px-10">
         <BrandLogo size="sm" />
         <Link
           href="/my-rooms"
-          className="inline-flex min-h-11 items-center rounded-full border border-border bg-card px-4 text-sm font-normal text-primary transition-transform active:scale-95"
+          className="inline-flex min-h-11 items-center rounded-[14px] border border-hairline bg-surface px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-subtle"
         >
           내 방
         </Link>
       </header>
 
-      <main className="flex-1 px-5">
-        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em]">안녕하세요, {user.name}님</h1>
+      <main className="flex-1 px-5 pb-5 lg:px-10">
+        <p className="text-sm font-medium text-ink-secondary">안녕하세요, {user.name}님</p>
+        <h1 className="mt-1 text-[28px] font-bold leading-tight text-ink">어디로 함께 갈까요?</h1>
 
-        <Link
-          href="/points"
-          className="mt-6 block rounded-[18px] bg-foreground p-6 text-background"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <Coins className="size-5" aria-hidden />
-              </span>
-              <div>
-                <p className="text-xs text-background/70">사용 가능 포인트</p>
-                <p className="text-lg font-bold">
-                  {Number(data.balance.availablePoints).toLocaleString('ko-KR')}P
-                </p>
-              </div>
-            </div>
-            <span className="rounded-full bg-background/15 px-3 py-1 text-xs font-semibold">
-              내역 보기
-            </span>
-          </div>
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-background/70">
-            <Info className="size-3.5" aria-hidden />
-            포인트는 관리자가 지급하는 가상 포인트입니다.
-          </p>
-        </Link>
-
-        <section className="mt-7" aria-labelledby="recommendation-heading">
-          <div className="flex items-end justify-between gap-3">
+        <section className="route-grid brand-route-gradient mt-6 overflow-hidden rounded-[22px] p-6 text-white" aria-labelledby="route-hero-heading">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <h2
-                id="recommendation-heading"
-                className="text-lg font-semibold"
-              >
-                조건이 맞는 추천
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                실제 방의 좌표·출발 시각·잔여 좌석을 계산한 결과입니다.
-              </p>
-              {recommendationFeed.seed ? (
-                <p className="mt-1 text-xs font-semibold text-foreground">
-                  기준: {recommendationFeed.seed.origin} →{' '}
-                  {recommendationFeed.seed.destination}
-                </p>
-              ) : null}
+              <p className="text-xs font-semibold tracking-[0.12em] text-white/60">ROUTE MATCH</p>
+              <h2 id="route-hero-heading" className="mt-2 text-[21px] font-semibold text-white">같은 방향의 동승 방을 찾아보세요</h2>
             </div>
-            {recommendationFeed.status === 'READY' ? (
-              <span className="shrink-0 text-xs font-semibold text-muted-foreground">
-                최대 5개
-              </span>
-            ) : null}
+            <Compass className="size-6 shrink-0 text-[#AAB8B0]" aria-hidden />
           </div>
-
-          {recommendationFeed.status === 'READY' ? (
-            <div className="mt-4 flex flex-col gap-4">
-              {recommendationFeed.recommendations.map((recommendation) => (
-                <RecommendationCard
-                  key={recommendation.tripId}
-                  recommendation={recommendation}
-                />
-              ))}
-              {recommendationFeed.omittedForTraceFailure > 0 ? (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  근거를 안전하게 저장하지 못한 일부 후보는 표시하지 않았습니다.
-                </p>
-              ) : null}
+          <div className="mt-6 rounded-[18px] border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
+            <div className="grid grid-cols-[24px_1fr] items-center gap-x-3 gap-y-2 text-sm">
+              <MapPin className="size-4 text-white" aria-hidden />
+              <span className="font-semibold">출발지와 가까운 방</span>
+              <span className="ml-2 h-4 border-l border-dashed border-white/30" aria-hidden />
+              <Route className="size-4 text-[#AAB8B0]" aria-hidden />
+              <span className="col-start-2 text-white/75">도착 방향과 시간까지 비교</span>
             </div>
-          ) : (
-            <div className="mt-4">
-              <EmptyState
-                label={
-                  recommendationFeed.status === 'NO_SEED'
-                    ? '좌표가 확인된 예정 방이 없어 추천 기준을 만들 수 없습니다.'
-                    : recommendationFeed.status === 'TRACE_FAILED'
-                      ? '추천 근거를 안전하게 저장하지 못해 결과를 표시하지 않습니다.'
-                    : '같은 목적지·300m 이내·출발 전후 15분 조건을 모두 충족하는 방이 없습니다.'
-                }
-              />
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                인접 목적지 추천은 허용 반경과 우회 정책 확정 후 제공합니다.
-              </p>
-            </div>
-          )}
-        </section>
-
-        <section className="mt-7 pb-4" aria-labelledby="room-list-heading">
-          <h2 id="room-list-heading" className="text-[21px] font-semibold tracking-tight">
-            모집 방
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            실제 등록된 방의 출발 정보와 참여 현황을 확인하세요.
-          </p>
-
-          {discoverableTrips.length > 0 ? (
-            <div className="mt-4 flex flex-col gap-4">
-              {discoverableTrips.map((room) => (
-                <DatabaseRoomCard
-                  key={room.tripId}
-                  room={room}
-                  currentUserId={user.userId}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="mt-4">
-              <EmptyState label="현재 확인할 수 있는 모집 방이 없습니다." />
-            </div>
-          )}
-
+          </div>
           <Link
-            href="/create"
-            className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-full border border-primary bg-background px-6 py-3 text-[17px] font-normal text-primary transition-transform active:scale-95"
+            href="/home#recommendation-heading"
+            className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px] bg-white px-5 text-base font-semibold text-brand-strong transition-transform active:scale-[0.98]"
           >
-            <Plus className="size-5" aria-hidden />
-            새 동승 방 만들기
+            추천 모집 찾기 <ArrowRight className="size-4" aria-hidden />
           </Link>
         </section>
-      </main>
 
+        <section className="mt-8" aria-labelledby="recommendation-heading">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.1em] text-brand">FOR YOUR ROUTE</p>
+              <h2 id="recommendation-heading" className="mt-1 text-[21px] font-semibold">조건에 맞는 추천</h2>
+            </div>
+            {recommendationFeed.status === 'READY' ? <span className="text-xs text-ink-secondary">최대 5개</span> : null}
+          </div>
+          {recommendationFeed.status === 'READY' ? (
+            <div className="mt-4 flex flex-col gap-4 lg:grid lg:grid-cols-2">
+              {recommendationFeed.recommendations.map((recommendation) => (
+                <RecommendationCard key={recommendation.tripId} recommendation={recommendation} />
+              ))}
+              {recommendationFeed.omittedForTraceFailure > 0 ? (
+                <p className="text-xs leading-relaxed text-ink-secondary lg:col-span-2">근거를 안전하게 확인하지 못한 방은 추천 결과에 표시하지 않았습니다.</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-4"><EmptyState label={recommendationFeed.status === 'NO_SEED' ? '좌표가 확인된 이용 방이 없어 추천 기준을 만들 수 없습니다.' : recommendationFeed.status === 'TRACE_FAILED' ? '추천 근거를 안전하게 확인하지 못해 결과를 표시하지 않습니다.' : '현재 조건에 맞는 추천 방이 없습니다. 출발지와 도착지를 설정하면 가까운 방을 추천해 드립니다.'} /></div>
+          )}
+        </section>
+
+        <section className="mt-8" aria-labelledby="room-list-heading">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.1em] text-ink-secondary">LEAVING SOON</p>
+              <h2 id="room-list-heading" className="mt-1 text-[21px] font-semibold">곧 출발하는 모집</h2>
+            </div>
+            <Link href="/create" className="text-sm font-semibold text-brand hover:text-brand-strong">방 만들기</Link>
+          </div>
+          {discoverableTrips.length > 0 ? (
+            <div className="mt-4 flex flex-col gap-4 lg:grid lg:grid-cols-2">
+              {discoverableTrips.map((room) => <DatabaseRoomCard key={room.tripId} room={room} currentUserId={user.userId} />)}
+            </div>
+          ) : (
+            <div className="mt-4"><EmptyState label="현재 확인할 수 있는 모집 방이 없습니다." /></div>
+          )}
+          <Link href="/create" className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-brand/30 bg-brand-soft px-5 text-base font-semibold text-brand-strong hover:bg-sage-soft">
+            <Plus className="size-4" aria-hidden /> 새 동승 방 만들기
+          </Link>
+        </section>
+
+        <Link href="/points" className="mt-8 flex items-center justify-between rounded-[18px] border border-hairline bg-surface p-5 transition-colors hover:bg-surface-subtle">
+          <span className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-[14px] bg-brand-soft text-brand"><Coins className="size-5" aria-hidden /></span><span><span className="block text-xs text-ink-secondary">사용 가능 포인트</span><strong className="numeric mt-0.5 block text-lg font-semibold">{Number(data.balance.availablePoints).toLocaleString('ko-KR')}P</strong></span></span>
+          <ArrowRight className="size-4 text-ink-tertiary" aria-hidden />
+        </Link>
+      </main>
       <TabBar />
     </MobileShell>
   )

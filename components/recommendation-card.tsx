@@ -11,7 +11,7 @@ export function RecommendationCard({
   recommendation: RankedRecommendation
 }) {
   return (
-    <Card className="flex flex-col gap-3 border-primary/40">
+    <Card className="flex flex-col gap-5 border-brand/35 bg-surface">
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge tone="brand" icon={Sparkles}>
           추천
@@ -23,7 +23,7 @@ export function RecommendationCard({
       </div>
 
       <div>
-        <h3 className="flex items-center gap-2 text-lg font-extrabold">
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-ink">
           <span>{recommendation.origin}</span>
           <ArrowRight
             className="size-4 shrink-0 text-muted-foreground"
@@ -36,17 +36,17 @@ export function RecommendationCard({
         </p>
       </div>
 
-      <p className="rounded-xl bg-primary/10 px-3 py-3 text-sm font-semibold leading-relaxed">
+      <p className="rounded-[14px] border border-brand/10 bg-brand-soft px-4 py-3 text-sm leading-relaxed text-ink">
         {recommendation.reason}
       </p>
 
-      <dl className="grid grid-cols-2 gap-3 rounded-xl bg-muted/70 p-3 text-sm">
+      <dl className="grid grid-cols-2 gap-3 rounded-[14px] bg-surface-subtle p-4 text-sm">
         <div>
           <dt className="flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="size-3.5" aria-hidden />
             출발지 거리
           </dt>
-          <dd className="mt-0.5 font-extrabold">
+          <dd className="mt-0.5 font-semibold tabular-nums">
             {recommendation.originDistanceMeters.toLocaleString('ko-KR')}m
           </dd>
         </div>
@@ -61,7 +61,7 @@ export function RecommendationCard({
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">예상 1인 분담금</dt>
-          <dd className="mt-0.5 font-extrabold">
+          <dd className="mt-0.5 font-semibold tabular-nums">
             {recommendation.expectedSharePoints.toLocaleString('ko-KR')}P
           </dd>
         </div>
@@ -80,7 +80,7 @@ export function RecommendationCard({
 
       <Link
         href={`/room/${recommendation.tripId}`}
-        className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl bg-foreground px-4 py-3 text-sm font-bold text-background transition-transform active:scale-[0.99]"
+        className="inline-flex min-h-11 items-center justify-center gap-1 rounded-[14px] bg-brand px-4 py-3 text-sm font-semibold text-white transition-transform hover:bg-brand-strong active:scale-[0.99]"
       >
         상세 확인 후 참여하기
         <ArrowRight className="size-4" aria-hidden />

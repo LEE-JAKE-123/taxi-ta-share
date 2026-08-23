@@ -4,11 +4,11 @@ type Tone = 'brand' | 'mint' | 'info' | 'warn' | 'muted'
 type Kind = 'status' | 'emphasis'
 
 const toneStyles: Record<Tone, string> = {
-  brand: 'bg-primary/10 text-primary',
-  mint: 'bg-mint-soft text-foreground',
-  info: 'bg-info-soft text-info',
-  warn: 'bg-warn-soft text-warn',
-  muted: 'bg-muted text-muted-foreground',
+  brand: 'border-brand/20 bg-brand-soft text-brand-strong',
+  mint: 'border-success/20 bg-success-soft text-success',
+  info: 'border-info/20 bg-info-soft text-info',
+  warn: 'border-warning/20 bg-warning-soft text-warning',
+  muted: 'border-hairline bg-surface-subtle text-ink-secondary',
 }
 const toneLabels: Record<Tone, string> = {
   brand: '주요 상태',
@@ -44,7 +44,7 @@ export function StatusBadge({
     <span
       role={kind === 'status' ? 'status' : undefined}
       className={cn(
-        'inline-flex min-h-7 items-center gap-1 rounded-full border border-current/10 px-2.5 py-1 text-xs font-semibold',
+        'inline-flex min-h-7 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold tracking-[-0.01em]',
         toneStyles[tone],
         className,
       )}

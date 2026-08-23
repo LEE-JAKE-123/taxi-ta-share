@@ -82,7 +82,7 @@ export default async function CorePage({
           </p>
           <Link
             href="/create"
-            className="mt-3 block w-full rounded-xl bg-primary px-4 py-3 text-center text-sm font-bold"
+            className="mt-3 block w-full rounded-xl bg-primary px-4 py-3 text-center text-sm font-bold text-primary-foreground"
           >
             동승 방 만들기
           </Link>
@@ -168,7 +168,7 @@ export default async function CorePage({
                   trip.currentUserStatus ? (
                     <Link
                       href={`/room/${trip.tripId}/gathering`}
-                      className="mt-3 block rounded-xl bg-primary px-4 py-3 text-center text-sm font-bold"
+                      className="mt-3 block rounded-xl bg-primary px-4 py-3 text-center text-sm font-bold text-primary-foreground"
                     >
                       집결·이동 진행
                     </Link>
@@ -205,7 +205,7 @@ export default async function CorePage({
 }
 
 function Submit({ children }: { children: React.ReactNode }) {
-  return <button type="submit" className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold active:scale-[0.99]">{children}</button>
+  return <button type="submit" className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground active:scale-[0.99]">{children}</button>
 }
 
 function MiniSubmit({ children }: { children: React.ReactNode }) {

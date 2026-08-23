@@ -43,13 +43,19 @@ function TabItem({
   icon: typeof Home
   active: boolean
 }) {
+  const isCreateTab = href === '/create'
+
   return (
     <li className="flex flex-1">
       <Link
         href={href}
         className={cn(
           'flex min-h-11 w-full flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[11px] font-medium outline-none transition-[transform,color,background-color] duration-150 motion-reduce:transition-none active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-          active ? 'bg-brand-soft text-brand' : 'text-ink-muted hover:bg-surface-subtle hover:text-ink',
+          isCreateTab
+            ? 'bg-primary text-primary-foreground hover:bg-action-focus'
+            : active
+              ? 'bg-brand-soft text-brand'
+              : 'text-ink-muted hover:bg-surface-subtle hover:text-ink',
         )}
         aria-current={active ? 'page' : undefined}
       >

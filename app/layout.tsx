@@ -43,7 +43,7 @@ export default async function RootLayout({
   const authenticatedUser = await getCurrentUser()
 
   return (
-    <html lang="ko" className={`bg-muted ${notoSansKr.variable} ${gothicA1.variable}`}>
+    <html lang="ko" className={`bg-background ${notoSansKr.variable} ${gothicA1.variable}`}>
       <body className="font-sans antialiased">
         <AppProvider
           authenticatedUser={

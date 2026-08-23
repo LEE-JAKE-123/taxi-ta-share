@@ -108,7 +108,7 @@ export default async function AdminReportsPage({
                     ) : null}
                   </select>
                   {report.reportedName ? (
-                    <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn-foreground">
+                    <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
                       이용 정지를 선택하면 대상 계정이 즉시 정지되고, 현재 로그인 세션도 해제됩니다. 이 조치는 신고 처리 감사 기록에 남습니다.
                     </p>
                   ) : null}

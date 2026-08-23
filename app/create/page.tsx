@@ -1,7 +1,7 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
-import { Calendar, Flag, MapPin, Users } from 'lucide-react'
+import { useActionState, useEffect, useRef, useState } from 'react'
+import { Calendar, Flag, MapPin, RotateCcw, Users } from 'lucide-react'
 import { createRoomAction, type CreateTripState } from '@/app/core/actions'
 import { BigButton, BottomBar } from '@/components/bottom-bar'
 import { MobileShell } from '@/components/mobile-shell'
@@ -107,11 +107,16 @@ export default function CreateRoomPage() {
     )
   }
   const selectRelativeDeparture = (minutes: number) => {
-    const next = new Date()
-    next.setMinutes(next.getMinutes() + minutes)
+    setDeparture((currentDeparture) => {
+      const next = new Date(currentDeparture)
+      next.setMinutes(next.getMinutes() + minutes)
+      return clampDeparture(next, minimumDeparture, maximumDeparture)
+    })
+  }
+  const resetDeparture = () => {
     setDeparture(
       clampDeparture(
-        roundUpToNextTenMinutes(next),
+        roundUpToNextTenMinutes(new Date()),
         minimumDeparture,
         maximumDeparture,
       ),
@@ -138,7 +143,7 @@ export default function CreateRoomPage() {
             <legend className="mb-2 text-sm font-bold">
               <Calendar className="mr-1.5 inline size-4" aria-hidden /> 출발 시각
             </legend>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex gap-2">
               {[
                 { label: '+10분', minutes: 10 },
                 { label: '+30분', minutes: 30 },
@@ -148,11 +153,20 @@ export default function CreateRoomPage() {
                   key={option.minutes}
                   type="button"
                   onClick={() => selectRelativeDeparture(option.minutes)}
-                  className="min-h-11 rounded-full border border-border bg-card px-2 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-h-11 flex-1 rounded-full border border-border bg-card px-2 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {option.label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={resetDeparture}
+                className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-card text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="현재 시간으로 초기화"
+                title="현재 시간으로 초기화"
+              >
+                <RotateCcw className="size-4" aria-hidden />
+              </button>
             </div>
             <div className="mt-3">
               <DateTimePicker
@@ -293,15 +307,12 @@ function DateTimePicker({
 
   return (
     <div className="rounded-xl border border-border bg-card p-3" aria-label="출발 일시 선택기">
-      <div className="grid grid-cols-[1fr_1fr_1fr_1.25fr_2fr_2fr] gap-1 text-center text-[11px] font-semibold text-muted-foreground">
-        <span>년</span><span>월</span><span>일</span><span>오전/오후</span><span>시</span><span>분</span>
-      </div>
-      <div className="mt-2 grid grid-cols-[1fr_1fr_1fr_1.25fr_2fr_2fr] gap-1">
-        <DateTimeSelect label="년" options={years} selected={year} onSelect={(next) => updateDate(next, month, day)} />
-        <DateTimeSelect label="월" options={months} selected={month} onSelect={(next) => updateDate(year, next, day)} />
-        <DateTimeSelect label="일" options={days} selected={day} onSelect={(next) => updateDate(year, month, next)} />
-        <DateTimeSelect
-          label="오전 또는 오후"
+      <div className="grid grid-cols-[minmax(2.375rem,0.78fr)_minmax(2rem,0.64fr)_minmax(2rem,0.64fr)_minmax(3.25rem,1.08fr)_minmax(2.875rem,1fr)_minmax(2.875rem,1fr)] gap-1">
+        <DateTimeWheel label="년" options={years} selected={year} onSelect={(next) => updateDate(next, month, day)} />
+        <DateTimeWheel label="월" options={months} selected={month} onSelect={(next) => updateDate(year, next, day)} />
+        <DateTimeWheel label="일" options={days} selected={day} onSelect={(next) => updateDate(year, month, next)} />
+        <DateTimeWheel
+          label="오전/오후"
           options={PERIOD_OPTIONS}
           selected={period}
           onSelect={(next) => updateTime(next, hour, minute)}
@@ -309,7 +320,7 @@ function DateTimePicker({
             isPastTime(next, hour, nextMinute),
           )}
         />
-        <DateTimeSelect
+        <DateTimeWheel
           label="시"
           options={TWELVE_HOUR_OPTIONS}
           selected={hour}
@@ -318,7 +329,7 @@ function DateTimePicker({
             isPastTime(period, next, nextMinute),
           )}
         />
-        <DateTimeSelect
+        <DateTimeWheel
           label="분"
           options={MINUTE_OPTIONS}
           selected={minute}
@@ -333,7 +344,7 @@ function DateTimePicker({
   )
 }
 
-function DateTimeSelect({
+function DateTimeWheel({
   label,
   options,
   selected,
@@ -346,19 +357,186 @@ function DateTimeSelect({
   onSelect: (value: string) => void
   isDisabled?: (value: string) => boolean
 }) {
+  const wheelRef = useRef<HTMLDivElement>(null)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selectedValueRef = useRef(selected)
+  const wheelDeltaRef = useRef(0)
+  const precisionWheelLockUntilRef = useRef(0)
+
+  useEffect(() => {
+    selectedValueRef.current = selected
+  }, [selected])
+
+  useEffect(() => {
+    const selectedOption = wheelRef.current?.querySelector<HTMLElement>(
+      `[data-wheel-value="${selected}"]`,
+    )
+    selectedOption?.scrollIntoView({ block: 'center', behavior: 'auto' })
+  }, [options, selected])
+
+  useEffect(() => () => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+  }, [])
+
+  const selectNearestOption = () => {
+    const wheel = wheelRef.current
+    if (!wheel) return
+
+    const center = wheel.getBoundingClientRect().top + wheel.clientHeight / 2
+    const nearest = Array.from(
+      wheel.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+    ).reduce<HTMLButtonElement | null>((closest, option) => {
+      if (!closest) return option
+      const closestCenter = closest.getBoundingClientRect().top + closest.clientHeight / 2
+      const optionCenter = option.getBoundingClientRect().top + option.clientHeight / 2
+      return Math.abs(optionCenter - center) < Math.abs(closestCenter - center)
+        ? option
+        : closest
+    }, null)
+
+    const nextValue = nearest?.dataset.wheelValue
+    if (nextValue) selectValue(nextValue)
+  }
+
+  const selectValue = (nextValue: string) => {
+    if (nextValue === selectedValueRef.current) return
+    selectedValueRef.current = nextValue
+    onSelect(nextValue)
+  }
+
+  const selectAndFocus = (nextValue: string) => {
+    selectValue(nextValue)
+    window.requestAnimationFrame(() => {
+      wheelRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-wheel-value="${nextValue}"]`)
+        ?.focus()
+    })
+  }
+
+  const getNextEnabledOption = (direction: -1 | 1) => {
+    const enabledOptions = options.filter((option) => !isDisabled?.(option))
+    const currentIndex = enabledOptions.indexOf(selectedValueRef.current)
+    if (currentIndex < 0) return null
+    const nextIndex = Math.min(
+      Math.max(currentIndex + direction, 0),
+      enabledOptions.length - 1,
+    )
+    return enabledOptions[nextIndex] ?? null
+  }
+
+  const moveSelection = (direction: -1 | 1, shouldFocus = true) => {
+    const nextValue = getNextEnabledOption(direction)
+    if (!nextValue || nextValue === selectedValueRef.current) return false
+    if (shouldFocus) selectAndFocus(nextValue)
+    else selectValue(nextValue)
+    return true
+  }
+
   return (
-    <select
+    <div
+      role="radiogroup"
       aria-label={label}
-      value={selected}
-      onChange={(event) => onSelect(event.target.value)}
-      className="min-h-11 w-full rounded-lg border border-border bg-background px-1 text-center text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
+      aria-orientation="vertical"
+      className="min-w-0"
     >
-      {options.map((option) => (
-        <option key={option} value={option} disabled={isDisabled?.(option)}>
-          {option}
-        </option>
-      ))}
-    </select>
+      <p className="mb-1 text-center text-[11px] font-semibold text-muted-foreground">
+        {label}
+      </p>
+      <div className="relative rounded-lg border border-border bg-background">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 top-1/2 z-10 h-11 -translate-y-1/2 rounded-md border border-primary/30 bg-primary/10"
+        />
+        <div
+          ref={wheelRef}
+          className="h-36 snap-y snap-mandatory overflow-y-auto overscroll-contain scroll-smooth px-1 py-11 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden motion-reduce:scroll-auto"
+          onWheel={(event) => {
+            if (!event.deltaY) return
+
+            const viewportHeight = wheelRef.current?.clientHeight ?? 144
+            const delta = event.deltaMode === 1
+              ? event.deltaY * 16
+              : event.deltaMode === 2
+                ? event.deltaY * viewportHeight
+                : event.deltaY
+            const direction = delta > 0 ? 1 : -1
+
+            // At either end, let the surrounding page receive the wheel event.
+            const nextOption = getNextEnabledOption(direction)
+            if (!nextOption || nextOption === selectedValueRef.current) {
+              wheelDeltaRef.current = 0
+              return
+            }
+
+            event.preventDefault()
+
+            const isPrecisionWheel = event.deltaMode === 0 && Math.abs(delta) < 40
+            if (!isPrecisionWheel) {
+              wheelDeltaRef.current = 0
+              moveSelection(direction, false)
+              return
+            }
+
+            const now = event.timeStamp
+            if (now < precisionWheelLockUntilRef.current) return
+            if (wheelDeltaRef.current && Math.sign(wheelDeltaRef.current) !== direction) {
+              wheelDeltaRef.current = 0
+            }
+
+            wheelDeltaRef.current += delta
+            if (Math.abs(wheelDeltaRef.current) < 40) return
+
+            const accumulatedDirection = wheelDeltaRef.current > 0 ? 1 : -1
+            wheelDeltaRef.current = 0
+            if (moveSelection(accumulatedDirection, false)) {
+              precisionWheelLockUntilRef.current = now + 120
+            }
+          }}
+          onScroll={() => {
+            if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+            settleTimerRef.current = setTimeout(selectNearestOption, 120)
+          }}
+        >
+          {options.map((option) => {
+            const disabled = isDisabled?.(option) ?? false
+            const isSelected = option === selected
+            return (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                data-wheel-value={option}
+                disabled={disabled}
+                aria-checked={isSelected}
+                aria-label={`${label} ${option}`}
+                tabIndex={isSelected ? 0 : -1}
+                onClick={() => selectValue(option)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    moveSelection(-1)
+                  } else if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    moveSelection(1)
+                  } else if (event.key === 'Home') {
+                    event.preventDefault()
+                    const first = options.find((value) => !isDisabled?.(value))
+                    if (first) selectAndFocus(first)
+                  } else if (event.key === 'End') {
+                    event.preventDefault()
+                    const last = options.findLast((value) => !isDisabled?.(value))
+                    if (last) selectAndFocus(last)
+                  }
+                }}
+                className="relative z-20 block min-h-11 w-full snap-center rounded-md px-1 text-center text-sm font-semibold leading-none text-foreground transition-[color,background-color,font-size] duration-150 motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:text-muted-foreground disabled:line-through aria-checked:bg-primary aria-checked:text-[21px] aria-checked:text-primary-foreground"
+              >
+                {option}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
   )
 }
 

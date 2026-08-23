@@ -12,7 +12,7 @@ export interface ToastItem {
 const toneStyles: Record<ToastItem['tone'], string> = {
   default: 'bg-foreground text-background',
   success: 'bg-foreground text-background',
-  warn: 'bg-warn text-warn-foreground',
+  warn: 'border-warn/30 bg-warn-soft text-warn',
 }
 
 const toneIcon = {

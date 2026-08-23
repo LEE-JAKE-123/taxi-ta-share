@@ -75,7 +75,7 @@
   color-scheme: light;
   --radius: 0.875rem;
 
-  --canvas: #f7f8f5;
+  --canvas: #ffffff;
   --surface: #ffffff;
   --surface-subtle: #eef2ef;
   --surface-dark: #12231d;
@@ -91,7 +91,7 @@
   --hairline: #dde4df;
   --success: #187a56;
   --success-soft: #e5f2eb;
-  --warning: #a66a16;
+  --warning: #8a5713;
   --warning-soft: #fff4df;
   --danger: #c24752;
   --danger-soft: #fcebed;

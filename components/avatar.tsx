@@ -14,11 +14,15 @@ export function Avatar({
 }) {
   const sizeCls =
     size === 'lg' ? 'size-12 text-base' : size === 'sm' ? 'size-8 text-xs' : 'size-10 text-sm'
+  const colorClass = avatarColor(index)
+  const foregroundClass =
+    colorClass === 'bg-accent' ? 'text-brand-strong' : 'text-primary-foreground'
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center rounded-full font-bold text-primary-foreground ring-2 ring-card',
-        avatarColor(index),
+        'inline-flex items-center justify-center rounded-full font-bold ring-2 ring-card',
+        colorClass,
+        foregroundClass,
         sizeCls,
         className,
       )}

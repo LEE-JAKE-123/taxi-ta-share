@@ -30,7 +30,7 @@ TaxiTaShare는 **Premium Mobility, Calm Confidence, Clear Route**를 핵심 인�
 
 | Token | Value | Use |
 |---|---:|---|
-| `--canvas` | `#F7F8F5` | 기본 쿨 아이보리 배경 |
+| `--canvas` | `#FFFFFF` | 전체 화면의 순수 흰색 기본 배경 |
 | `--surface` | `#FFFFFF` | 카드와 입력 영역 |
 | `--surface-subtle` | `#EEF2EF` | 보조 섹션·비활성 영역 |
 | `--surface-dark` | `#12231D` | route hero·정산 완료 결과 |
@@ -111,4 +111,4 @@ linear-gradient(135deg, #12231D 0%, #163428 55%, #285A45 100%)
 - 일반 카드·버튼·배지에 shadow를 넣거나 모든 요소를 `rounded-full`로 만들지 않는다.
 - AI 기능에 보라색 gradient·반짝이 장식을 반복하지 않으며 포인트 화면을 암호화폐 지갑처럼 꾸미지 않는다.
 
-**TaxiTaShare는 쿨 아이보리 위에 딥 포레스트와 포레스트 에메랄드를 중심으로 사용하고, 세이지 포인트를 절제해 신뢰감 있고 고급스러운 이동·정산 경험을 제공하는 프리미엄 캠퍼스 모빌리티 UI를 지향한다.**
+**TaxiTaShare는 순수 흰색 캔버스 위에 딥 포레스트와 포레스트 에메랄드를 중심으로 사용하고, 세이지 포인트를 절제해 신뢰감 있고 고급스러운 이동·정산 경험을 제공하는 프리미엄 캠퍼스 모빌리티 UI를 지향한다.**

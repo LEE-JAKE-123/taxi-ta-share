@@ -19,28 +19,28 @@ export default async function OnboardingPage() {
         </header>
 
         <main className="flex flex-1 flex-col justify-center py-8 sm:py-14">
-          <section className="brand-route-gradient route-grid relative overflow-hidden rounded-[22px] px-6 py-8 text-white sm:px-10 sm:py-12">
-            <div className="absolute -right-12 -top-12 size-48 rounded-full border border-white/10" />
-            <div className="absolute -bottom-20 right-10 size-40 rounded-full border border-white/10" />
+          <section className="route-grid relative overflow-hidden rounded-[22px] border border-hairline bg-surface px-6 py-8 sm:px-10 sm:py-12">
+            <div className="absolute -right-12 -top-12 size-48 rounded-full border border-brand/20" />
+            <div className="absolute -bottom-20 right-10 size-40 rounded-full border border-brand/20" />
             <div className="relative flex items-start justify-between gap-5">
               <div>
-                <p className="text-xs font-semibold tracking-[0.14em] text-[#b9d0c4] uppercase">TaxiTaShare route</p>
-                <h1 className="mt-4 text-pretty text-[34px] font-bold leading-[1.3] tracking-[-0.04em] sm:text-[42px]">
+                <p className="text-xs font-semibold tracking-[0.14em] text-brand-strong uppercase">TaxiTaShare route</p>
+                <h1 className="mt-4 text-pretty text-[34px] font-bold leading-[1.3] tracking-[-0.04em] text-ink sm:text-[42px]">
                   같은 방향이라면,
                   <br />
                   함께 더 가볍게.
                 </h1>
               </div>
-              <TaxiMark className="size-16 shrink-0 border-white/20 bg-white/95 sm:size-20" />
+              <TaxiMark className="size-16 shrink-0 border-brand/20 bg-brand-soft sm:size-20" />
             </div>
-            <div className="relative mt-9 flex items-center gap-3 text-sm text-white/80">
-              <span className="size-3 rounded-full border-[3px] border-[#9ed1b9] bg-surface-dark" />
-              <span className="h-px flex-1 bg-white/30" />
-              <Route className="size-5 text-[#b9d0c4]" aria-hidden />
-              <span className="h-px flex-1 bg-white/30" />
-              <MapPin className="size-5 text-[#b9d0c4]" aria-hidden />
+            <div className="relative mt-9 flex items-center gap-3 text-sm text-ink-secondary">
+              <span className="size-3 rounded-full border-[3px] border-brand bg-brand-soft" />
+              <span className="h-px flex-1 bg-hairline" />
+              <Route className="size-5 text-brand" aria-hidden />
+              <span className="h-px flex-1 bg-hairline" />
+              <MapPin className="size-5 text-brand" aria-hidden />
             </div>
-            <p className="relative mt-4 max-w-md text-[15px] leading-relaxed text-white/75">
+            <p className="relative mt-4 max-w-md text-[15px] leading-relaxed text-ink-secondary">
               출발지와 목적지, 시간과 인원을 기준으로 안전하게 동승 방을 찾아드려요.
             </p>
           </section>

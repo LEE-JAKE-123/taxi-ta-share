@@ -309,7 +309,7 @@ export default async function RoomDetailPage({
                       <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                       <PendingSubmitButton
                         pendingLabel="차단 처리 중..."
-                        className="border border-warn bg-background text-warn-foreground"
+                        className="border border-warn bg-background text-warn"
                       >
                         <UserX className="size-4" aria-hidden />
                         차단하기
@@ -534,7 +534,7 @@ export default async function RoomDetailPage({
               <input type="hidden" name="idempotencyKey" value={randomUUID()} />
               <PendingSubmitButton
                 pendingLabel="참여 취소 처리 중..."
-                className="border border-warn bg-background text-warn-foreground"
+                className="border border-warn bg-background text-warn"
               >
                 참여 취소
               </PendingSubmitButton>

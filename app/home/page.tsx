@@ -41,26 +41,26 @@ export default async function HomePage({
         <p className="text-sm font-medium text-ink-secondary">안녕하세요, {user.name}님</p>
         <h1 className="mt-1 text-[28px] font-bold leading-tight text-ink">어디로 함께 갈까요?</h1>
 
-        <section className="route-grid brand-route-gradient mt-6 overflow-hidden rounded-[22px] p-6 text-white" aria-labelledby="route-hero-heading">
+        <section className="route-grid mt-6 overflow-hidden rounded-[22px] border border-hairline bg-surface p-6" aria-labelledby="route-hero-heading">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold tracking-[0.12em] text-white/60">ROUTE MATCH</p>
-              <h2 id="route-hero-heading" className="mt-2 text-[21px] font-semibold text-white">같은 방향의 동승 방을 찾아보세요</h2>
+              <p className="text-xs font-semibold tracking-[0.12em] text-brand-strong">ROUTE MATCH</p>
+              <h2 id="route-hero-heading" className="mt-2 text-[21px] font-semibold text-ink">같은 방향의 동승 방을 찾아보세요</h2>
             </div>
-            <Compass className="size-6 shrink-0 text-[#AAB8B0]" aria-hidden />
+            <Compass className="size-6 shrink-0 text-brand" aria-hidden />
           </div>
-          <div className="mt-6 rounded-[18px] border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
+          <div className="mt-6 rounded-[18px] border border-brand/20 bg-brand-soft p-4">
             <div className="grid grid-cols-[24px_1fr] items-center gap-x-3 gap-y-2 text-sm">
-              <MapPin className="size-4 text-white" aria-hidden />
-              <span className="font-semibold">출발지와 가까운 방</span>
-              <span className="ml-2 h-4 border-l border-dashed border-white/30" aria-hidden />
-              <Route className="size-4 text-[#AAB8B0]" aria-hidden />
-              <span className="col-start-2 text-white/75">도착 방향과 시간까지 비교</span>
+              <MapPin className="size-4 text-brand" aria-hidden />
+              <span className="font-semibold text-ink">출발지와 가까운 방</span>
+              <span className="ml-2 h-4 border-l border-dashed border-brand/40" aria-hidden />
+              <Route className="size-4 text-brand" aria-hidden />
+              <span className="col-start-2 text-ink-secondary">도착 방향과 시간까지 비교</span>
             </div>
           </div>
           <Link
             href="/home#recommendation-heading"
-            className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px] bg-white px-5 text-base font-semibold text-brand-strong transition-transform active:scale-[0.98]"
+            className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-brand/30 bg-brand-soft px-5 text-base font-semibold text-brand-strong transition-colors hover:bg-sage-soft active:scale-[0.98]"
           >
             추천 모집 찾기 <ArrowRight className="size-4" aria-hidden />
           </Link>
@@ -94,11 +94,17 @@ export default async function HomePage({
               <p className="text-xs font-semibold tracking-[0.1em] text-ink-secondary">LEAVING SOON</p>
               <h2 id="room-list-heading" className="mt-1 text-[21px] font-semibold">곧 출발하는 모집</h2>
             </div>
-            <Link href="/create" className="text-sm font-semibold text-brand hover:text-brand-strong">방 만들기</Link>
+            <Link
+              href="/rooms"
+              aria-label="전체 모집 목록 보기"
+              className="inline-flex min-h-11 items-center text-sm font-semibold text-brand transition-colors hover:text-brand-strong"
+            >
+              더보기 <ArrowRight className="ml-1 size-4" aria-hidden />
+            </Link>
           </div>
           {discoverableTrips.length > 0 ? (
             <div className="mt-4 flex flex-col gap-4 lg:grid lg:grid-cols-2">
-              {discoverableTrips.map((room) => <DatabaseRoomCard key={room.tripId} room={room} currentUserId={user.userId} />)}
+              {discoverableTrips.slice(0, 3).map((room) => <DatabaseRoomCard key={room.tripId} room={room} currentUserId={user.userId} />)}
             </div>
           ) : (
             <div className="mt-4"><EmptyState label="현재 확인할 수 있는 모집 방이 없습니다." /></div>

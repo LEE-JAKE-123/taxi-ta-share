@@ -119,7 +119,7 @@ export default async function GatheringPage({
                     />
                     <PendingSubmitButton
                       pendingLabel="노쇼 기록 중..."
-                      className="min-h-10 bg-warn py-2 text-sm text-warn-foreground"
+                      className="min-h-10 bg-destructive py-2 text-sm text-destructive-foreground"
                     >
                       <UserX className="size-4" aria-hidden />
                       노쇼 기록

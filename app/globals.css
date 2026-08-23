@@ -8,6 +8,22 @@
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, var(--font-pretendard), 'Noto Sans KR', sans-serif;
   --font-mono: var(--font-jetbrains), monospace;
 
+  /* Design 0 semantic colour contract */
+  --color-canvas: var(--canvas);
+  --color-canvas-parchment: var(--canvas-parchment);
+  --color-surface-dark: var(--surface-dark);
+  --color-surface-black: var(--surface-black);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-action: var(--action);
+  --color-action-focus: var(--action-focus);
+  --color-action-on-dark: var(--action-on-dark);
+  --color-hairline: var(--hairline);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+
+  /* shadcn compatibility aliases */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -28,7 +44,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Extended semantic tokens */
+  /* Legacy semantic aliases kept while screens transition. */
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-mint: var(--mint);
@@ -53,47 +69,51 @@
   color-scheme: light;
   --radius: 0.6875rem;
 
-  /* Apple-inspired neutral canvas adapted for TaxiTaShare */
-  --background: #ffffff;
-  --foreground: #1d1d1f;
+  --canvas: #ffffff;
+  --canvas-parchment: #f5f5f7;
+  --surface-dark: #272729;
+  --surface-black: #000000;
+  --ink: #1d1d1f;
+  --ink-muted: #7a7a7a;
+  --action: #0066cc;
+  --action-focus: #0071e3;
+  --action-on-dark: #2997ff;
+  --hairline: #e0e0e0;
+  --danger: #b42318;
+  --warning: #9a6700;
+  --success: #087443;
 
-  --card: oklch(1 0 0);
-  --card-foreground: #1d1d1f;
-  --popover: oklch(1 0 0);
-  --popover-foreground: #1d1d1f;
-
-  --primary: #0066cc;
-  --primary-foreground: #ffffff;
-
-  --secondary: #f5f5f7;
-  --secondary-foreground: #1d1d1f;
-
-  --muted: #f5f5f7;
-  --muted-foreground: #6e6e73;
-
-  --accent: #f5f5f7;
-  --accent-foreground: #0066cc;
-
-  /* Coral for warnings */
-  --destructive: oklch(0.66 0.17 25);
-  --destructive-foreground: oklch(0.99 0.01 90);
-
-  --border: #e0e0e0;
-  --input: #e0e0e0;
-  --ring: #0071e3;
-
-  /* Extended */
-  --brand: #0066cc;
-  --brand-foreground: #ffffff;
-  --mint: oklch(0.62 0.1 175);
-  --mint-foreground: oklch(0.99 0.01 90);
-  --mint-soft: oklch(0.95 0.04 178);
-  --info: oklch(0.58 0.13 245);
-  --info-foreground: oklch(0.99 0.01 90);
-  --info-soft: oklch(0.95 0.035 240);
-  --warn: oklch(0.62 0.18 25);
-  --warn-foreground: oklch(0.99 0.01 90);
-  --warn-soft: oklch(0.955 0.03 30);
+  /* Compatibility aliases for existing components and Tailwind classes. */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--canvas);
+  --card-foreground: var(--ink);
+  --popover: var(--canvas);
+  --popover-foreground: var(--ink);
+  --primary: var(--action);
+  --primary-foreground: var(--canvas);
+  --secondary: var(--canvas-parchment);
+  --secondary-foreground: var(--ink);
+  --muted: var(--canvas-parchment);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--canvas-parchment);
+  --accent-foreground: var(--action);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--canvas);
+  --border: var(--hairline);
+  --input: var(--hairline);
+  --ring: var(--action-focus);
+  --brand: var(--action);
+  --brand-foreground: var(--canvas);
+  --mint: var(--success);
+  --mint-foreground: var(--canvas);
+  --mint-soft: color-mix(in srgb, var(--success) 10%, var(--canvas));
+  --info: var(--action);
+  --info-foreground: var(--canvas);
+  --info-soft: color-mix(in srgb, var(--action) 10%, var(--canvas));
+  --warn: var(--warning);
+  --warn-foreground: var(--canvas);
+  --warn-soft: color-mix(in srgb, var(--warning) 14%, var(--canvas));
 }
 
 @layer base {
@@ -106,10 +126,13 @@
     line-height: 1.44;
     letter-spacing: -0.01em;
   }
-  h1, h2, h3 {
+  h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     letter-spacing: -0.02em;
   }
+  h1 { font-size: 2.125rem; line-height: 1.12; }
+  h2 { font-size: 1.75rem; line-height: 1.18; letter-spacing: -0.018em; }
+  h3 { font-size: 1.3125rem; line-height: 1.25; letter-spacing: -0.012em; }
   button, a, input, select, textarea {
     @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring;
   }

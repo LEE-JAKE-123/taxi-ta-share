@@ -79,7 +79,7 @@ export default function SignupPage() {
           </Field>
 
           <fieldset>
-            <legend className="mb-2 text-sm font-bold">성별</legend>
+            <legend className="mb-2 text-sm font-semibold">성별</legend>
             <div className="grid grid-cols-2 gap-2">
               {[
                 ['female', '여성'],
@@ -87,7 +87,7 @@ export default function SignupPage() {
               ].map(([value, label]) => (
                 <label
                   key={value}
-                  className="cursor-pointer rounded-full border border-border bg-card py-3 text-center text-sm font-semibold has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:text-primary-foreground focus-within:ring-2 focus-within:ring-ring"
+                  className="flex min-h-11 cursor-pointer items-center justify-center rounded-full border border-border bg-card px-3 py-3 text-center text-sm font-semibold has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:text-primary-foreground focus-within:ring-2 focus-within:ring-ring"
                 >
                   <input
                     type="radio"
@@ -138,7 +138,7 @@ export default function SignupPage() {
             </p>
           </Field>
 
-          <label className="mt-1 flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-left focus-within:ring-2 focus-within:ring-ring">
+          <label className="mt-1 flex cursor-pointer items-start gap-3 rounded-[18px] border border-border bg-card px-4 py-3 text-left focus-within:ring-2 focus-within:ring-ring">
             <input
               type="checkbox"
               name="privacyConsent"
@@ -185,7 +185,7 @@ function Field({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="mb-2 block text-sm font-bold">
+      <label htmlFor={id} className="mb-2 block text-sm font-semibold">
         {label}
       </label>
       {children}

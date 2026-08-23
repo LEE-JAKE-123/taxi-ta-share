@@ -51,7 +51,7 @@ export default async function HomePage({
               </span>
               <div>
                 <p className="text-xs text-background/70">사용 가능 포인트</p>
-                <p className="text-lg font-extrabold">
+                <p className="text-lg font-bold">
                   {Number(data.balance.availablePoints).toLocaleString('ko-KR')}P
                 </p>
               </div>
@@ -71,7 +71,7 @@ export default async function HomePage({
             <div>
               <h2
                 id="recommendation-heading"
-                className="text-lg font-extrabold"
+                className="text-lg font-semibold"
               >
                 조건이 맞는 추천
               </h2>

@@ -15,7 +15,7 @@ export default async function OnboardingPage() {
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <div className="relative mb-8">
             <TaxiMark className="size-56" />
-            <span className="absolute -right-3 -top-3 flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground">
+              <span className="absolute -right-3 -top-3 flex min-h-7 items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground">
               <Sparkles className="size-3.5" />
               AI 추천
             </span>
@@ -40,10 +40,10 @@ export default async function OnboardingPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Link href="/login" className="flex min-h-12 items-center justify-center rounded-full bg-primary px-6 py-3 text-[17px] text-primary-foreground transition-transform active:scale-95">
+          <Link href="/login" className="flex min-h-12 items-center justify-center rounded-full bg-primary px-6 py-3 text-[17px] font-normal text-primary-foreground transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             로그인
           </Link>
-          <Link href="/signup" className="flex min-h-12 items-center justify-center gap-2 rounded-full border border-primary px-6 py-3 text-[17px] text-primary transition-transform active:scale-95">
+          <Link href="/signup" className="flex min-h-12 items-center justify-center gap-2 rounded-full border border-primary px-6 py-3 text-[17px] font-normal text-primary transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             회원가입
             <ArrowRight className="size-5" />
           </Link>

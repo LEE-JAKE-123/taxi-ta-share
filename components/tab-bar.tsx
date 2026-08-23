@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 const tabs = [
   { href: '/home', label: '홈', icon: Home },
   { href: '/my-rooms', label: '내 방', icon: CarTaxiFront },
+  { href: '/create', label: '방 만들기', icon: Plus },
   { href: '/points', label: '포인트', icon: Coins },
   { href: '/mypage', label: '마이', icon: User },
 ]
@@ -20,25 +21,9 @@ export function TabBar() {
       aria-label="주요 메뉴"
       className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1068px]"
     >
-      <div className="relative border-t border-border/80 bg-card/80 backdrop-blur-xl backdrop-saturate-150">
+      <div className="border-t border-hairline bg-canvas/80 backdrop-blur-xl backdrop-saturate-150">
         <ul className="flex items-stretch justify-between px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2">
-          {tabs.slice(0, 2).map((t) => (
-            <TabItem key={t.href} {...t} active={pathname === t.href} />
-          ))}
-
-          {/* 가운데 강조된 방 만들기 플로팅 버튼 */}
-          <li className="flex flex-1 justify-center">
-            <Link
-              href="/create"
-              aria-label="새 동승 방 만들기"
-              className="-mt-6 flex size-14 flex-col items-center justify-center rounded-full bg-primary text-primary-foreground ring-4 ring-background transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            >
-              <Plus className="size-6" aria-hidden />
-              <span className="text-[10px] font-semibold">방 만들기</span>
-            </Link>
-          </li>
-
-          {tabs.slice(2).map((t) => (
+          {tabs.map((t) => (
             <TabItem key={t.href} {...t} active={pathname === t.href} />
           ))}
         </ul>
@@ -63,13 +48,13 @@ function TabItem({
       <Link
         href={href}
         className={cn(
-          'flex min-h-11 w-full flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[11px] font-normal transition-colors',
-          active ? 'text-foreground' : 'text-muted-foreground',
+          'flex min-h-11 w-full flex-col items-center justify-center gap-1 rounded-[11px] py-1.5 text-[11px] font-normal outline-none transition-[transform,color,background-color] duration-150 motion-reduce:transition-none active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+          active ? 'text-action' : 'text-ink-muted hover:text-ink',
         )}
         aria-current={active ? 'page' : undefined}
       >
         <Icon
-          className={cn('size-5', active && 'text-primary')}
+          className="size-5"
           strokeWidth={active ? 2.4 : 1.8}
           aria-hidden
         />

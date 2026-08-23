@@ -1,6 +1,7 @@
 import { Car, UsersRound } from 'lucide-react'
 import { DatabaseRoomCard } from '@/components/database-room-card'
 import { EmptyState } from '@/components/empty-state'
+import { HostedRoomsSection } from '@/components/hosted-rooms-section'
 import { MobileShell } from '@/components/mobile-shell'
 import { TabBar } from '@/components/tab-bar'
 import { TopBar } from '@/components/top-bar'
@@ -17,28 +18,6 @@ export default async function MyRoomsPage() {
     <MobileShell>
       <TopBar title="내 방" backHref="/home" />
       <main className="flex-1 px-5 pb-4 pt-4">
-        <section className="mb-7" aria-labelledby="hosted-rooms-heading">
-          <div className="mb-3 flex items-center gap-2">
-            <Car className="size-4 text-primary" aria-hidden />
-            <h2 id="hosted-rooms-heading" className="text-sm font-semibold">
-              내가 만든 방
-            </h2>
-          </div>
-          {hosted.length > 0 ? (
-            <div className="flex flex-col gap-3">
-              {hosted.map((room) => (
-                <DatabaseRoomCard
-                  key={room.tripId}
-                  room={room}
-                  currentUserId={user.userId}
-                />
-              ))}
-            </div>
-          ) : (
-            <EmptyState label="아직 만든 방이 없습니다." />
-          )}
-        </section>
-
         <section aria-labelledby="joined-rooms-heading">
           <div className="mb-3 flex items-center gap-2">
             <UsersRound className="size-4 text-mint" aria-hidden />
@@ -61,11 +40,13 @@ export default async function MyRoomsPage() {
           )}
         </section>
 
+        <HostedRoomsSection rooms={hosted} currentUserId={user.userId} />
+
         <section className="mt-7" aria-labelledby="usage-history-heading">
           <div className="mb-3 flex items-center gap-2">
             <Car className="size-4 text-muted-foreground" aria-hidden />
             <h2 id="usage-history-heading" className="text-sm font-semibold">
-              이용 기록
+              이용·종료 기록
             </h2>
           </div>
           {usageHistory.length > 0 ? (
@@ -79,7 +60,7 @@ export default async function MyRoomsPage() {
               ))}
             </div>
           ) : (
-            <EmptyState label="아직 완료된 이용 기록이 없습니다." />
+            <EmptyState label="아직 이용 또는 종료 기록이 없습니다." />
           )}
         </section>
       </main>

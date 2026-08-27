@@ -110,6 +110,38 @@ const debtRepaymentLedgerTypeMigrationChecksum = createHash('sha256')
     await readFile('db/migrations/0029_debt_repayment_ledger_type_guard.sql'),
   )
   .digest('hex')
+const predepartureEscrowGuardMigrationChecksum = createHash('sha256')
+  .update(
+    await readFile('db/migrations/0030_predeparture_escrow_guard.sql'),
+  )
+  .digest('hex')
+const tripIncidentIntakeMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0031_trip_incident_intake.sql'))
+  .digest('hex')
+const tripIncidentReviewWorkflowMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0032_trip_incident_review_workflow.sql'))
+  .digest('hex')
+const memberNoShowExecutionMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0033_member_no_show_execution.sql'))
+  .digest('hex')
+const hostNoStartRefundExecutionMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0034_host_no_start_refund_execution.sql'))
+  .digest('hex')
+const tripIncidentRebuttalWindowMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0035_trip_incident_rebuttal_window.sql'))
+  .digest('hex')
+const adminPointGrantDualControlMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0036_admin_point_grant_dual_control.sql'))
+  .digest('hex')
+const incidentAndPointSafetyVerificationFiles = [
+  'db/verify/0030_predeparture_escrow_guard.sql',
+  'db/verify/0031_trip_incident_intake.sql',
+  'db/verify/0032_trip_incident_review_workflow.sql',
+  'db/verify/0033_member_no_show_execution.sql',
+  'db/verify/0034_host_no_start_refund_execution.sql',
+  'db/verify/0035_trip_incident_rebuttal_window.sql',
+  'db/verify/0036_admin_point_grant_dual_control.sql',
+]
 
 if (
   !databaseUrl ||
@@ -346,6 +378,217 @@ try {
           AND checksum = $28
           AND environment = $1
       ) AS debt_repayment_ledger_type_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0030_predeparture_escrow_guard'
+          AND checksum = $29
+          AND environment = $1
+      ) AS predeparture_escrow_guard_migration_valid,
+      to_regprocedure('assert_predeparture_closed_escrow(uuid)') IS NOT NULL
+        AS predeparture_escrow_function_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_deposits'::regclass
+          AND tgname = 'trip_deposits_validate_predeparture'
+          AND NOT tgisinternal
+      ) AS predeparture_deposit_insert_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_groups'::regclass
+          AND tgname = 'trip_groups_validate_confirmation_predeparture'
+          AND tgdeferrable
+          AND tginitdeferred
+          AND NOT tgisinternal
+      ) AS predeparture_confirmation_guard_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0031_trip_incident_intake'
+          AND checksum = $30
+          AND environment = $1
+      ) AS trip_incident_intake_migration_valid,
+      to_regclass('public.trip_incidents') IS NOT NULL
+        AS trip_incidents_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incidents'::regclass
+          AND tgname = 'trip_incidents_prevent_mutation'
+          AND NOT tgisinternal
+      ) AS trip_incident_immutability_guard_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0032_trip_incident_review_workflow'
+          AND checksum = $31
+          AND environment = $1
+      ) AS trip_incident_review_workflow_migration_valid,
+      to_regclass('public.trip_incident_rebuttals') IS NOT NULL
+        AS trip_incident_rebuttals_exists,
+      to_regclass('public.trip_incident_review_commands') IS NOT NULL
+        AS trip_incident_review_commands_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_rebuttals'::regclass
+          AND tgname = 'trip_incident_rebuttals_prevent_mutation'
+          AND NOT tgisinternal
+      ) AS trip_incident_rebuttal_immutability_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_review_commands'::regclass
+          AND tgname = 'trip_incident_review_commands_validate_insert'
+          AND NOT tgisinternal
+      ) AS trip_incident_review_admin_guard_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0033_member_no_show_execution'
+          AND checksum = $32
+          AND environment = $1
+      ) AS member_no_show_execution_migration_valid,
+      to_regclass('public.trip_incident_no_show_executions') IS NOT NULL
+        AS member_no_show_executions_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_no_show_executions'::regclass
+          AND tgname = 'trip_incident_no_show_executions_validate_insert'
+          AND NOT tgisinternal
+      ) AS member_no_show_execution_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_no_show_executions'::regclass
+          AND tgname = 'trip_incident_no_show_executions_require_participant'
+          AND tgdeferrable
+          AND tginitdeferred
+          AND NOT tgisinternal
+      ) AS member_no_show_execution_atomicity_guard_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0034_host_no_start_refund_execution'
+          AND checksum = $33
+          AND environment = $1
+      ) AS host_no_start_refund_execution_migration_valid,
+      to_regclass('public.trip_incident_no_start_refund_executions') IS NOT NULL
+        AS host_no_start_refund_executions_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_no_start_refund_executions'::regclass
+          AND tgname = 'trip_incident_no_start_refund_executions_validate_insert'
+          AND NOT tgisinternal
+      ) AS host_no_start_refund_execution_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_no_start_refund_executions'::regclass
+          AND tgname = 'trip_incident_no_start_refund_executions_require_refunds'
+          AND tgdeferrable
+          AND tginitdeferred
+          AND NOT tgisinternal
+      ) AS host_no_start_refund_execution_atomicity_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'point_ledger_one_no_start_refund_per_execution_user_idx'
+      ) AS host_no_start_refund_execution_ledger_unique_exists,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0035_trip_incident_rebuttal_window'
+          AND checksum = $34
+          AND environment = $1
+      ) AS trip_incident_rebuttal_window_migration_valid,
+      (
+        SELECT count(*) = 1
+        FROM schema_migrations
+        WHERE version = '0036_admin_point_grant_dual_control'
+          AND checksum = $35
+          AND environment = $1
+      ) AS admin_point_grant_dual_control_migration_valid,
+      to_regclass('public.point_grant_execution_requests') IS NOT NULL
+        AS point_grant_execution_requests_exists,
+      to_regclass('public.point_grant_approval_commands') IS NOT NULL
+        AS point_grant_approval_commands_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_grant_execution_requests'::regclass
+          AND tgname = 'point_grant_execution_requests_validate_insert'
+          AND NOT tgisinternal
+      ) AS point_grant_execution_request_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_grant_approval_commands'::regclass
+          AND tgname = 'point_grant_approval_commands_validate_insert'
+          AND NOT tgisinternal
+      ) AS point_grant_approval_guard_exists,
+      (
+        SELECT count(*) = 0
+        FROM point_ledger l
+        LEFT JOIN point_grant_execution_requests e
+          ON e.execution_request_id = l.grant_execution_request_id
+        LEFT JOIN point_grant_approval_commands a
+          ON a.approval_command_id = l.grant_approval_command_id
+        WHERE l.entry_type = 'ADMIN_GRANT'
+          AND (
+            (l.grant_execution_request_id IS NULL)
+              <> (l.grant_approval_command_id IS NULL)
+            OR (
+              l.grant_execution_request_id IS NOT NULL
+              AND (
+                e.execution_request_id IS NULL
+                OR a.approval_command_id IS NULL
+                OR a.execution_request_id IS DISTINCT FROM e.execution_request_id
+                OR l.user_id IS DISTINCT FROM e.target_user_id
+                OR l.actor_user_id IS DISTINCT FROM e.requested_by_admin_id
+                OR l.actor_user_id = a.approved_by_admin_id
+                OR l.available_delta IS DISTINCT FROM e.amount
+                OR l.reason IS DISTINCT FROM e.reason
+                OR l.point_request_id IS DISTINCT FROM e.source_point_request_id
+              )
+            )
+          )
+      ) AS admin_point_grant_provenance_valid,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'point_ledger'::regclass
+          AND tgname = 'point_ledger_require_linked_point_request_fulfillment'
+          AND tgdeferrable
+          AND tginitdeferred
+          AND NOT tgisinternal
+      ) AS linked_point_request_fulfillment_atomicity_guard_exists,
+      (
+        SELECT count(*) = 0
+        FROM point_grant_execution_requests e
+        JOIN point_ledger l
+          ON l.grant_execution_request_id = e.execution_request_id
+        LEFT JOIN point_grant_requests r
+          ON r.request_id = e.source_point_request_id
+        WHERE e.source_point_request_id IS NOT NULL
+          AND (
+            r.status IS DISTINCT FROM 'FULFILLED'
+            OR r.fulfilled_ledger_id IS DISTINCT FROM l.ledger_id
+            OR r.fulfilled_by IS DISTINCT FROM l.actor_user_id
+          )
+      ) AS linked_point_request_fulfillments_valid,
+      to_regclass('public.trip_incident_review_notifications') IS NOT NULL
+        AS trip_incident_review_notifications_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_review_notifications'::regclass
+          AND tgname = 'trip_incident_review_notifications_validate_insert'
+          AND NOT tgisinternal
+      ) AS trip_incident_notification_guard_exists,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'trip_incident_review_commands'::regclass
+          AND tgname = 'trip_incident_review_commands_require_notification'
+          AND tgdeferrable
+          AND tginitdeferred
+          AND NOT tgisinternal
+      ) AS trip_incident_notification_atomicity_guard_exists,
+      position(
+        $$has_valid_notification IS DISTINCT FROM true$$
+        IN pg_get_functiondef('validate_trip_incident_review_command()'::regprocedure)
+      ) > 0 AS responsibility_confirmation_notification_guard_exists,
       position(
         $$OR ledger_entry_type <> 'DEBT_REPAYMENT'$$
         IN pg_get_functiondef('validate_point_debt_repayment()'::regprocedure)
@@ -956,6 +1199,13 @@ try {
     policyV2AdjustmentTriggerDispatchMigrationChecksum,
     policyV2DebtRepaymentMigrationChecksum,
     debtRepaymentLedgerTypeMigrationChecksum,
+    predepartureEscrowGuardMigrationChecksum,
+    tripIncidentIntakeMigrationChecksum,
+    tripIncidentReviewWorkflowMigrationChecksum,
+    memberNoShowExecutionMigrationChecksum,
+    hostNoStartRefundExecutionMigrationChecksum,
+    tripIncidentRebuttalWindowMigrationChecksum,
+    adminPointGrantDualControlMigrationChecksum,
   ])
 
   const verification = result.rows[0]
@@ -965,6 +1215,23 @@ try {
 
   if (failedChecks.length) {
     throw new Error(`Database verification failed: ${failedChecks.join(', ')}.`)
+  }
+
+  for (const verificationFile of incidentAndPointSafetyVerificationFiles) {
+    const sql = await readFile(verificationFile, 'utf8')
+    const focusedResult = await client.query(sql)
+    if (focusedResult.rowCount !== 1) {
+      throw new Error(`Database verification returned no result for ${verificationFile}.`)
+    }
+
+    const focusedFailures = Object.entries(focusedResult.rows[0] ?? {})
+      .filter(([, passed]) => passed !== true)
+      .map(([name]) => name)
+    if (focusedFailures.length) {
+      throw new Error(
+        `Database verification failed for ${verificationFile}: ${focusedFailures.join(', ')}.`,
+      )
+    }
   }
 
   console.log(

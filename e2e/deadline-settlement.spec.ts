@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { Pool } from '@neondatabase/serverless'
+import {
+  seedApprovedDirectGrant,
+  seedExecutedMemberNoShow,
+} from './support/operational-fixtures'
 
 type DueSettlementFixture = {
   tripId: string
@@ -22,6 +26,7 @@ async function seedDueSettlement(input: {
   const client = await pool.connect()
   const runId = `e2e-deadline-${randomUUID()}`
   const adminId = randomUUID()
+  const approverAdminId = randomUUID()
   const hostId = randomUUID()
   const memberOneId = randomUUID()
   const memberTwoId = randomUUID()
@@ -53,6 +58,13 @@ async function seedDueSettlement(input: {
       [adminId, randomUUID(), `60${Date.now().toString().slice(-7)}`, `${runId}-admin`, `${runId}-admin@jbnu.ac.kr`],
     )
     await client.query(
+      `INSERT INTO users (
+         user_id, signup_attempt_id, student_id, name, gender, school_email,
+         role, account_status
+       ) VALUES ($1, $2, $3, $4, 'female', $5, 'ADMIN', 'ACTIVE')`,
+      [approverAdminId, randomUUID(), `61${Date.now().toString().slice(-7)}`, `${runId}-approver`, `${runId}-approver@jbnu.ac.kr`],
+    )
+    await client.query(
       `INSERT INTO trip_groups (
          trip_id, host_user_id, origin, destination, departure_at,
          max_participants, estimated_fare, status, creation_idempotency_key,
@@ -76,13 +88,14 @@ async function seedDueSettlement(input: {
       [tripId],
     )
     for (const [index, userId] of userIds.entries()) {
-      await client.query(
-        `INSERT INTO point_ledger (
-           user_id, entry_type, available_delta, held_delta, trip_id,
-           actor_user_id, reason, idempotency_key
-         ) VALUES ($1, 'ADMIN_GRANT', $2, 0, NULL, $3, 'E2E deadline grant', $4)`,
-        [userId, input.grantAmounts[index], adminId, `${runId}:grant:${userId}`],
-      )
+      await seedApprovedDirectGrant({
+        client,
+        targetUserId: userId,
+        amount: input.grantAmounts[index],
+        requestedByAdminId: adminId,
+        approvedByAdminId: approverAdminId,
+        reason: 'E2E deadline grant',
+      })
       await client.query(
         `INSERT INTO trip_deposits (trip_id, user_id, amount) VALUES ($1, $2, $3)`,
         [tripId, userId, input.depositAmount],
@@ -139,13 +152,13 @@ async function seedDueSettlement(input: {
        WHERE trip_id = $1`,
       [tripId, randomUUID()],
     )
-    await client.query(
-      `UPDATE trip_participants
-       SET status = 'NO_SHOW', no_show_at = now(), no_show_marked_by = $3,
-           no_show_idempotency_key = $4
-       WHERE trip_id = $1 AND user_id = $2`,
-      [tripId, memberTwoId, hostId, randomUUID()],
-    )
+    await seedExecutedMemberNoShow({
+      client,
+      tripId,
+      reporterUserId: hostId,
+      reportedUserId: memberTwoId,
+      adminId,
+    })
     await client.query(
       `INSERT INTO trip_settlements (
          trip_id, actual_fare, participant_count, final_share, submitted_by,

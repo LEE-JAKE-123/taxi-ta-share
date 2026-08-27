@@ -15,12 +15,18 @@ import {
   closeTrip,
   confirmFare,
   confirmTripAndDeposit,
+  createPointGrantExecutionRequest,
   createTrip,
-  fulfillPointRequest,
   forceSettleFareDisputeByAdmin,
-  grantPoints,
+  approvePointGrantExecution,
+  executePointGrantExecution,
+  preparePointRequestFulfillment,
   checkInParticipant,
-  markParticipantNoShow,
+  decideTripIncident,
+  executeConfirmedHostNoStartRefund,
+  executeConfirmedMemberNoShow,
+  publishTripIncidentRebuttalWindow,
+  reportTripIncident,
   requestPoints,
   resolveFareDispute,
   setDesignatedFareSubmitter,
@@ -28,6 +34,7 @@ import {
   startTrip,
   submitActualFare,
   submitFareDispute,
+  submitTripIncidentRebuttal,
   withdrawFareDispute,
 } from '@/lib/core/service'
 import {
@@ -364,7 +371,7 @@ export async function grantAction(formData: FormData) {
   const admin = await requireAdmin()
   await execute(
     async () => {
-      await grantPoints({
+      await createPointGrantExecutionRequest({
         adminId: admin.userId,
         targetUserId: text(formData, 'targetUserId'),
         amount: Number(text(formData, 'amount')),
@@ -372,7 +379,7 @@ export async function grantAction(formData: FormData) {
         idempotencyKey: text(formData, 'idempotencyKey'),
       })
     },
-    '포인트를 지급했습니다.',
+    '포인트 지급 실행 요청을 만들었습니다. 다른 관리자의 승인이 필요합니다.',
   )
 }
 
@@ -391,7 +398,7 @@ function finishPointPath(
 export async function grantPointsAction(formData: FormData) {
   const admin = await requireAdmin()
   try {
-    await grantPoints({
+    await createPointGrantExecutionRequest({
       adminId: admin.userId,
       targetUserId: text(formData, 'targetUserId'),
       amount: Number(text(formData, 'amount')),
@@ -403,11 +410,11 @@ export async function grantPointsAction(formData: FormData) {
       '/admin',
       error instanceof CoreError
         ? error.message
-        : '포인트를 지급하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        : '지급 실행 요청을 만들지 못했습니다. 잠시 후 다시 시도해주세요.',
       true,
     )
   }
-  finishPointPath('/admin', '포인트를 지급했습니다.')
+  finishPointPath('/admin', '지급 실행 요청을 만들었습니다. 다른 관리자의 승인이 필요합니다.')
 }
 
 export async function requestPointsAction(formData: FormData) {
@@ -431,23 +438,63 @@ export async function requestPointsAction(formData: FormData) {
   finishPointPath('/points', '관리자에게 포인트 지급을 요청했습니다.')
 }
 
-export async function fulfillPointRequestAction(formData: FormData) {
+export async function preparePointRequestFulfillmentAction(formData: FormData) {
   const admin = await requireAdmin()
   try {
-    await fulfillPointRequest({
+    await preparePointRequestFulfillment({
       adminId: admin.userId,
       requestId: text(formData, 'requestId'),
+      idempotencyKey: text(formData, 'idempotencyKey'),
     })
   } catch (error) {
     finishPointPath(
       '/admin',
       error instanceof CoreError
         ? error.message
-        : '포인트 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        : '지급 실행 요청을 만들지 못했습니다. 잠시 후 다시 시도해주세요.',
       true,
     )
   }
-  finishPointPath('/admin', '포인트 요청을 승인하고 지급했습니다.')
+  finishPointPath('/admin', '지급 실행 요청을 만들었습니다. 다른 관리자의 승인이 필요합니다.')
+}
+
+export async function approvePointGrantExecutionAction(formData: FormData) {
+  const admin = await requireAdmin()
+  try {
+    await approvePointGrantExecution({
+      adminId: admin.userId,
+      executionRequestId: text(formData, 'executionRequestId'),
+      idempotencyKey: text(formData, 'idempotencyKey'),
+    })
+  } catch (error) {
+    finishPointPath(
+      '/admin',
+      error instanceof CoreError
+        ? error.message
+        : '지급 실행 요청을 승인하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishPointPath('/admin', '지급 실행 요청을 승인했습니다. 기안 관리자가 지급을 실행해야 합니다.')
+}
+
+export async function executePointGrantExecutionAction(formData: FormData) {
+  const admin = await requireAdmin()
+  try {
+    await executePointGrantExecution({
+      adminId: admin.userId,
+      executionRequestId: text(formData, 'executionRequestId'),
+    })
+  } catch (error) {
+    finishPointPath(
+      '/admin',
+      error instanceof CoreError
+        ? error.message
+        : '승인된 지급을 실행하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      true,
+    )
+  }
+  finishPointPath('/admin', '승인된 지급을 실행하고 원장에 기록했습니다.')
 }
 
 export async function submitFareAction(formData: FormData) {
@@ -619,14 +666,68 @@ export async function markNoShowAction(formData: FormData) {
   await executeJourney(
     tripId,
     'gathering',
-    () =>
-      markParticipantNoShow({
-        actorId: user.userId,
+    async () => {
+      await reportTripIncident({
+        reporterId: user.userId,
         tripId,
-        participantId,
+        reportedUserId: participantId,
+        incidentType: 'MEMBER_NO_SHOW',
+        description: text(formData, 'description'),
+        evidenceRef: text(formData, 'evidenceRef') || null,
         idempotencyKey,
-      }),
-    '참여자를 노쇼로 기록했습니다.',
+      })
+    },
+    '노쇼 신고를 접수했습니다. 운영자 판정 전에는 정산이나 제재가 변경되지 않습니다.',
+  )
+}
+
+export async function reportHostNoStartAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = requireJourneyUuid(text(formData, 'tripId'), '방')
+  const hostId = requireJourneyUuid(text(formData, 'hostId'), '방장')
+  const idempotencyKey = requireJourneyUuid(
+    text(formData, 'idempotencyKey'),
+    '요청',
+  )
+  await executeJourney(
+    tripId,
+    'gathering',
+    async () => {
+      await reportTripIncident({
+        reporterId: user.userId,
+        tripId,
+        reportedUserId: hostId,
+        incidentType: 'HOST_NO_START',
+        description: text(formData, 'description'),
+        evidenceRef: text(formData, 'evidenceRef') || null,
+        idempotencyKey,
+      })
+    },
+    '방장 미출발 신고를 접수했습니다. 운영자 판정 전에는 예치금과 정산이 변경되지 않습니다.',
+  )
+}
+
+export async function submitTripIncidentRebuttalAction(formData: FormData) {
+  const user = await requireCompleteUser()
+  const tripId = requireJourneyUuid(text(formData, 'tripId'), '방')
+  const incidentId = requireJourneyUuid(text(formData, 'incidentId'), '사건')
+  const idempotencyKey = requireJourneyUuid(
+    text(formData, 'idempotencyKey'),
+    '요청',
+  )
+  await executeJourney(
+    tripId,
+    'gathering',
+    async () => {
+      await submitTripIncidentRebuttal({
+        authorId: user.userId,
+        incidentId,
+        statement: text(formData, 'statement'),
+        evidenceRef: text(formData, 'evidenceRef') || null,
+        idempotencyKey,
+      })
+    },
+    '반박을 접수했습니다. 이 기록만으로 포인트·예치금·정산·참여 상태는 바뀌지 않습니다.',
   )
 }
 
@@ -886,6 +987,120 @@ export async function resolveUserReportAction(formData: FormData) {
     )
   }
   finishSafety('/admin/reports', '신고 처리 결과를 기록했습니다.')
+}
+
+export async function decideTripIncidentAction(formData: FormData) {
+  const admin = await requireAdmin()
+  const outcome = text(formData, 'outcome')
+  if (![
+    'START_REVIEW',
+    'RESPONSIBILITY_CONFIRMED',
+    'NOT_ESTABLISHED',
+  ].includes(outcome)) {
+    finishSafety('/admin/reports', '사건 검토 결과가 올바르지 않습니다.', true)
+  }
+  try {
+    await decideTripIncident({
+      adminId: admin.userId,
+      incidentId: requireJourneyUuid(text(formData, 'incidentId'), '사건'),
+      commandType: outcome as
+        | 'START_REVIEW'
+        | 'RESPONSIBILITY_CONFIRMED'
+        | 'NOT_ESTABLISHED',
+      decisionNote: text(formData, 'decisionNote'),
+      evidenceBasis: text(formData, 'evidenceBasis'),
+      idempotencyKey: requireJourneyUuid(
+        text(formData, 'idempotencyKey'),
+        '요청',
+      ),
+    })
+  } catch (error) {
+    finishSafety(
+      '/admin/reports',
+      error instanceof CoreError
+        ? error.message
+        : '사건 검토 기록을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      true,
+    )
+  }
+  finishSafety(
+    '/admin/reports',
+    '사건 검토 기록을 저장했습니다. 이 단계에서 포인트·예치금·정산·참여 상태는 바뀌지 않습니다.',
+  )
+}
+
+export async function publishTripIncidentRebuttalWindowAction(formData: FormData) {
+  const admin = await requireAdmin()
+  try {
+    await publishTripIncidentRebuttalWindow({
+      adminId: admin.userId,
+      incidentId: requireJourneyUuid(text(formData, 'incidentId'), '사건'),
+      idempotencyKey: requireJourneyUuid(text(formData, 'idempotencyKey'), '요청'),
+    })
+  } catch (error) {
+    finishSafety(
+      '/admin/reports',
+      error instanceof CoreError
+        ? error.message
+        : '반박 기회를 게시하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      true,
+    )
+  }
+  finishSafety('/admin/reports', '인앱 반박 기회를 게시했습니다. 10분 동안 반박을 받을 수 있습니다.')
+}
+
+export async function executeConfirmedMemberNoShowAction(formData: FormData) {
+  const admin = await requireAdmin()
+  const incidentId = requireJourneyUuid(text(formData, 'incidentId'), '사건')
+  try {
+    await executeConfirmedMemberNoShow({
+      adminId: admin.userId,
+      incidentId,
+      idempotencyKey: requireJourneyUuid(
+        text(formData, 'idempotencyKey'),
+        '요청',
+      ),
+    })
+  } catch (error) {
+    finishSafety(
+      '/admin/reports',
+      error instanceof CoreError
+        ? error.message
+        : '노쇼 사실을 확정하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      true,
+    )
+  }
+  finishSafety(
+    '/admin/reports',
+    '참여자 상태를 노쇼로 확정했습니다. 예치금·원장·정산 금액은 변경되지 않습니다.',
+  )
+}
+
+export async function executeConfirmedHostNoStartRefundAction(formData: FormData) {
+  const admin = await requireAdmin()
+  const incidentId = requireJourneyUuid(text(formData, 'incidentId'), '사건')
+  try {
+    await executeConfirmedHostNoStartRefund({
+      adminId: admin.userId,
+      incidentId,
+      idempotencyKey: requireJourneyUuid(
+        text(formData, 'idempotencyKey'),
+        '요청',
+      ),
+    })
+  } catch (error) {
+    finishSafety(
+      '/admin/reports',
+      error instanceof CoreError
+        ? error.message
+        : '미개시 환불을 실행하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      true,
+    )
+  }
+  finishSafety(
+    '/admin/reports',
+    '모집을 취소하고 비귀책 참여자의 예치금을 전액 반환했습니다. 모집자 예치금과 제재는 변경하지 않았습니다.',
+  )
 }
 
 export async function resolveSupportInquiryAction(formData: FormData) {

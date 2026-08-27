@@ -3,7 +3,10 @@ import 'server-only'
 import { RoutingError } from './errors'
 import { kakaoRoutingAdapter } from './kakao'
 import { naverRoutingAdapter } from './naver'
-import { preferredFallbackError } from './fallback'
+import {
+  canFallbackToAnotherProvider,
+  preferredFallbackError,
+} from './fallback'
 import type {
   Coordinates,
   PlaceResult,
@@ -40,6 +43,9 @@ async function withFallback<T>(
       return await run(adapter)
     } catch (error) {
       lastError = preferredFallbackError(lastError, error)
+      if (!canFallbackToAnotherProvider(error)) {
+        throw error
+      }
     }
   }
   throw lastError instanceof Error

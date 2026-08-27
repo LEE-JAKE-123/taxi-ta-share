@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { Pool } from '@neondatabase/serverless'
+import { seedApprovedDirectGrant } from './support/operational-fixtures'
 
 type Fixture = {
   tripId: string
@@ -20,6 +21,7 @@ async function seedDesignatedSubmitterTrip(): Promise<Fixture> {
   const client = await pool.connect()
   const runId = `e2e-designated-fare-${randomUUID()}`
   const adminId = randomUUID()
+  const approverAdminId = randomUUID()
   const hostId = randomUUID()
   const memberId = randomUUID()
   const outsiderId = randomUUID()
@@ -29,6 +31,7 @@ async function seedDesignatedSubmitterTrip(): Promise<Fixture> {
     await client.query('BEGIN')
     for (const [index, [userId, role]] of [
       [adminId, 'ADMIN'],
+      [approverAdminId, 'ADMIN'],
       [hostId, 'USER'],
       [memberId, 'USER'],
       [outsiderId, 'USER'],
@@ -72,13 +75,14 @@ async function seedDesignatedSubmitterTrip(): Promise<Fixture> {
       [tripId],
     )
     for (const userId of [hostId, memberId]) {
-      await client.query(
-        `INSERT INTO point_ledger (
-           user_id, entry_type, available_delta, held_delta, trip_id,
-           actor_user_id, reason, idempotency_key
-         ) VALUES ($1, 'ADMIN_GRANT', 6000, 0, NULL, $2, 'E2E grant', $3)`,
-        [userId, adminId, `${runId}:grant:${userId}`],
-      )
+      await seedApprovedDirectGrant({
+        client,
+        targetUserId: userId,
+        amount: 6000,
+        requestedByAdminId: adminId,
+        approvedByAdminId: approverAdminId,
+        reason: 'E2E grant',
+      })
       await client.query(
         `INSERT INTO trip_deposits (trip_id, user_id, amount) VALUES ($1, $2, 6000)`,
         [tripId, userId],

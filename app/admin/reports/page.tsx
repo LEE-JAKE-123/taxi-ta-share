@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import {
+  decideTripIncidentAction,
+  executeConfirmedHostNoStartRefundAction,
+  executeConfirmedMemberNoShowAction,
+  publishTripIncidentRebuttalWindowAction,
   resolveSupportInquiryAction,
   resolveUserReportAction,
 } from '@/app/core/actions'
@@ -13,6 +17,11 @@ import { getAdminSafetyDashboard } from '@/lib/admin/service'
 
 type ReportStatus = 'SUBMITTED' | 'IN_REVIEW' | 'RESOLVED' | 'DISMISSED'
 type TicketStatus = 'SUBMITTED' | 'IN_REVIEW' | 'ANSWERED' | 'CLOSED'
+type TripIncidentStatus =
+  | 'SUBMITTED'
+  | 'START_REVIEW'
+  | 'RESPONSIBILITY_CONFIRMED'
+  | 'NOT_ESTABLISHED'
 
 export default async function AdminReportsPage({
   searchParams,
@@ -32,6 +41,191 @@ export default async function AdminReportsPage({
     >
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+
+      <section aria-labelledby="trip-incident-queue-heading" className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <h2 id="trip-incident-queue-heading" className="text-lg font-extrabold">
+              운행 사고 신고
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              판정은 사실관계 기록입니다. 후속 실행은 사건 유형별로 분리되며, 참여자 노쇼는 상태만 확정하고 모집자 미개시는 비귀책 참여자 예치금만 반환합니다.
+            </p>
+          </div>
+          <span className="shrink-0 text-sm font-semibold text-muted-foreground">
+            {dashboard.tripIncidents.length}건
+          </span>
+        </div>
+
+        {dashboard.tripIncidents.length ? (
+          dashboard.tripIncidents.map((incident) => (
+            <Card key={incident.incidentId} className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h3 className="font-bold">{incidentTypeLabel(incident.incidentType)}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    접수 {formatDate(incident.submittedAt)} · 모집 #{incident.tripId.slice(0, 8)}
+                  </p>
+                </div>
+                <TripIncidentStatusBadge status={incident.status as TripIncidentStatus} />
+              </div>
+
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs text-muted-foreground">신고자</dt>
+                  <dd className="mt-1 font-semibold">{incident.reporterName}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">신고 대상</dt>
+                  <dd className="mt-1 font-semibold">{incident.reportedName}</dd>
+                </div>
+              </dl>
+
+              <p className="rounded-xl bg-muted px-3 py-3 text-sm leading-relaxed">
+                {incident.description}
+              </p>
+              {incident.evidenceRef ? (
+                <p className="break-all text-xs text-muted-foreground">
+                  신고 증거 참조: {incident.evidenceRef}
+                </p>
+              ) : null}
+
+              {incident.rebuttalStatement ? (
+                <div className="flex flex-col gap-2 rounded-xl border border-border px-3 py-3">
+                  <p className="text-sm font-semibold">대상자 소명</p>
+                  <p className="text-sm leading-relaxed">{incident.rebuttalStatement}</p>
+                  {incident.rebuttalEvidenceRef ? (
+                    <p className="break-all text-xs text-muted-foreground">
+                      소명 증거 참조: {incident.rebuttalEvidenceRef}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {!isTripIncidentTerminal(incident.status ?? 'SUBMITTED') ? (
+                <form action={decideTripIncidentAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                  <input type="hidden" name="incidentId" value={incident.incidentId} />
+                  <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                  <label htmlFor={`incident-outcome-${incident.incidentId}`} className="text-sm font-semibold">
+                    운영 기록
+                  </label>
+                  <select
+                    id={`incident-outcome-${incident.incidentId}`}
+                    name="outcome"
+                    className="app-input"
+                    defaultValue=""
+                    required
+                  >
+                    <option value="" disabled>운영 기록을 선택하세요</option>
+                    {incident.status === null ? (
+                      <option value="START_REVIEW">검토 시작</option>
+                    ) : null}
+                    {incident.status === 'START_REVIEW' ? (
+                      <>
+                        {incident.rebuttalStatement || incident.rebuttalDeadlineExpired ? (
+                          <option value="RESPONSIBILITY_CONFIRMED">귀책 사실 확인</option>
+                        ) : null}
+                        <option value="NOT_ESTABLISHED">귀책 사실 불인정</option>
+                      </>
+                    ) : null}
+                  </select>
+                  <label htmlFor={`incident-note-${incident.incidentId}`} className="text-sm font-semibold">
+                    판정 사유
+                  </label>
+                  <textarea
+                    id={`incident-note-${incident.incidentId}`}
+                    name="decisionNote"
+                    className="app-input min-h-24 resize-y"
+                    minLength={10}
+                    maxLength={1000}
+                    required
+                  />
+                  <label htmlFor={`incident-evidence-${incident.incidentId}`} className="text-sm font-semibold">
+                    판단 근거 참조
+                  </label>
+                  <textarea
+                    id={`incident-evidence-${incident.incidentId}`}
+                    name="evidenceBasis"
+                    className="app-input min-h-20 resize-y"
+                    minLength={10}
+                    maxLength={2000}
+                    required
+                  />
+                  <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                    {incident.status === 'START_REVIEW' && incident.rebuttalDeadlineAt && !incident.rebuttalDeadlineExpired && !incident.rebuttalStatement
+                      ? '반박 기한이 끝나거나 대상자가 반박을 제출하기 전에는 귀책 사실을 확정할 수 없습니다.'
+                      : '기록 저장 후에도 포인트 지급·환불·추가 차감이나 계정 제한은 자동으로 발생하지 않습니다.'}
+                  </p>
+                  <PendingSubmitButton pendingLabel="운영 기록을 저장하는 중…">
+                    운영 기록 저장
+                  </PendingSubmitButton>
+                </form>
+              ) : null}
+              {incident.status === 'START_REVIEW' &&
+              !incident.rebuttalNotificationId ? (
+                <form action={publishTripIncidentRebuttalWindowAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                  <input type="hidden" name="incidentId" value={incident.incidentId} />
+                  <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                  <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
+                    이전 검토 기록에는 반박 기회 게시 증거가 없습니다. 활성 비당사자 관리자가 지금 게시하면 피신고자에게 인앱으로 10분 반박 기회가 열립니다.
+                  </p>
+                  <PendingSubmitButton pendingLabel="반박 기회를 게시하는 중">
+                    10분 반박 기회 게시
+                  </PendingSubmitButton>
+                </form>
+              ) : null}
+              {incident.status === 'RESPONSIBILITY_CONFIRMED' &&
+              incident.incidentType === 'MEMBER_NO_SHOW' &&
+              !incident.noShowExecutionId &&
+              incident.reviewAdminId === admin.userId ? (
+                <form action={executeConfirmedMemberNoShowAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                  <input type="hidden" name="incidentId" value={incident.incidentId} />
+                  <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                  <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
+                    귀책 사실 확인에 따라 대상 참여자의 상태만 노쇼로 확정합니다. 예치금, 포인트 원장, 정산 금액은 이 단계에서 변경되지 않습니다.
+                  </p>
+                  <PendingSubmitButton pendingLabel="노쇼 사실을 확정하는 중…" className="bg-destructive text-destructive-foreground">
+                    노쇼 상태 확정
+                  </PendingSubmitButton>
+                </form>
+              ) : null}
+              {incident.status === 'RESPONSIBILITY_CONFIRMED' &&
+              incident.incidentType === 'MEMBER_NO_SHOW' &&
+              !incident.noShowExecutionId &&
+              incident.reviewAdminId !== admin.userId ? (
+                <p className="border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
+                  판정을 기록한 관리자만 노쇼 상태를 확정할 수 있습니다.
+                </p>
+              ) : null}
+              {incident.status === 'RESPONSIBILITY_CONFIRMED' &&
+              incident.incidentType === 'HOST_NO_START' &&
+              !incident.noStartRefundExecutionId &&
+              incident.reviewAdminId === admin.userId ? (
+                <form action={executeConfirmedHostNoStartRefundAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                  <input type="hidden" name="incidentId" value={incident.incidentId} />
+                  <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                  <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
+                    책임 확정에 따라 모집을 취소하고 비귀책 확정 참여자의 예치금만 전액 반환합니다. 모집자 예치금과 제재는 이 실행에서 변경하지 않습니다.
+                  </p>
+                  <PendingSubmitButton pendingLabel="미개시 환불을 실행하는 중" className="bg-destructive text-destructive-foreground">
+                    모집 취소 및 참여자 환불 실행
+                  </PendingSubmitButton>
+                </form>
+              ) : null}
+              {incident.status === 'RESPONSIBILITY_CONFIRMED' &&
+              incident.incidentType === 'HOST_NO_START' &&
+              !incident.noStartRefundExecutionId &&
+              incident.reviewAdminId !== admin.userId ? (
+                <p className="border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
+                  책임을 기록한 관리자만 모집 취소와 참여자 환불을 실행할 수 있습니다.
+                </p>
+              ) : null}
+            </Card>
+          ))
+        ) : (
+          <EmptyState label="처리할 운행 사고 신고가 없습니다." />
+        )}
+      </section>
 
       <section aria-labelledby="report-queue-heading" className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
@@ -242,12 +436,39 @@ function TicketStatusBadge({ status }: { status: TicketStatus }) {
   return <StatusBadge tone={tone}>{labels[status] ?? status}</StatusBadge>
 }
 
+function TripIncidentStatusBadge({ status }: { status: TripIncidentStatus }) {
+  const labels: Record<TripIncidentStatus, string> = {
+    SUBMITTED: '접수됨',
+    START_REVIEW: '검토 중',
+    RESPONSIBILITY_CONFIRMED: '귀책 사실 확인',
+    NOT_ESTABLISHED: '귀책 사실 불인정',
+  }
+  const tone =
+    status === 'RESPONSIBILITY_CONFIRMED'
+      ? 'warn'
+      : status === 'NOT_ESTABLISHED'
+        ? 'mint'
+        : status === 'START_REVIEW'
+          ? 'info'
+          : 'muted'
+
+  return <StatusBadge tone={tone}>{labels[status] ?? status}</StatusBadge>
+}
+
+function incidentTypeLabel(type: string) {
+  return type === 'HOST_NO_START' ? '방장 미출발 신고' : '참여자 노쇼 신고'
+}
+
 function isReportTerminal(status: string) {
   return status === 'RESOLVED' || status === 'DISMISSED'
 }
 
 function isTicketTerminal(status: string) {
   return status === 'ANSWERED' || status === 'CLOSED'
+}
+
+function isTripIncidentTerminal(status: string) {
+  return status === 'RESPONSIBILITY_CONFIRMED' || status === 'NOT_ESTABLISHED'
 }
 
 function formatDate(value: string) {

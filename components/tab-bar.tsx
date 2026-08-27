@@ -22,7 +22,7 @@ export function TabBar() {
       className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1280px]"
     >
       <div className="border-t border-hairline bg-surface/90 backdrop-blur-xl backdrop-saturate-150">
-        <ul className="flex items-stretch justify-between px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2">
+        <ul className="safe-area-bottom-2 flex items-stretch justify-between px-2 pt-2">
           {tabs.map((t) => (
             <TabItem key={t.href} {...t} active={pathname === t.href} />
           ))}

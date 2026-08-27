@@ -3,6 +3,7 @@ import { getCurrentUser, hasCompleteProfile } from '@/lib/auth/session'
 import { searchPlaces } from '@/lib/routing'
 import {
   routingErrorMessage,
+  routingRetryAfter,
   routingErrorStatus,
 } from '@/lib/routing/response'
 import { parsePlaceQuery } from '@/lib/routing/validation'
@@ -38,9 +39,15 @@ export async function GET(request: Request) {
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (error) {
+    const retryAfter = routingRetryAfter(error)
     return NextResponse.json(
       { error: routingErrorMessage(error) },
-      { status: routingErrorStatus(error) },
+      {
+        status: routingErrorStatus(error),
+        headers: retryAfter === undefined ? undefined : {
+          'Retry-After': String(retryAfter),
+        },
+      },
     )
   }
 }

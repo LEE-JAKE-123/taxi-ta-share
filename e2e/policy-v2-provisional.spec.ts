@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { Pool } from '@neondatabase/serverless'
+import { seedApprovedDirectGrant } from './support/operational-fixtures'
 
 type PolicyV2Fixture = {
   tripId: string
   adminId: string
+  approverAdminId: string
   adminToken: string
   hostId: string
   memberOneId: string
@@ -30,6 +32,7 @@ async function seedPolicyV2Settlement(input: {
   const client = await pool.connect()
   const runId = `e2e-policy-v2-${randomUUID()}`
   const adminId = input.existingUsers?.adminId ?? randomUUID()
+  const approverAdminId = input.existingUsers?.approverAdminId ?? randomUUID()
   const hostId = input.existingUsers?.hostId ?? randomUUID()
   const memberOneId = input.existingUsers?.memberOneId ?? randomUUID()
   const memberTwoId = input.existingUsers?.memberTwoId ?? randomUUID()
@@ -81,6 +84,19 @@ async function seedPolicyV2Settlement(input: {
           createHash('sha256').update(adminToken).digest('hex'),
         ],
       )
+      await client.query(
+        `INSERT INTO users (
+           user_id, signup_attempt_id, student_id, name, gender, school_email,
+           role, account_status
+         ) VALUES ($1, $2, $3, $4, 'female', $5, 'ADMIN', 'ACTIVE')`,
+        [
+          approverAdminId,
+          randomUUID(),
+          `6${String(studentIdSeed).padStart(8, '0')}`,
+          `${runId}-grant-approver`,
+          `${runId}-grant-approver@jbnu.ac.kr`,
+        ],
+      )
     }
     await client.query(
       `INSERT INTO trip_groups (
@@ -106,13 +122,14 @@ async function seedPolicyV2Settlement(input: {
       [tripId],
     )
     for (const [index, userId] of userIds.entries()) {
-      await client.query(
-        `INSERT INTO point_ledger (
-           user_id, entry_type, available_delta, held_delta, trip_id,
-           actor_user_id, reason, idempotency_key
-         ) VALUES ($1, 'ADMIN_GRANT', $2, 0, NULL, $3, 'E2E policy-v2 grant', $4)`,
-        [userId, input.grantAmounts[index], adminId, `${runId}:grant:${userId}`],
-      )
+      await seedApprovedDirectGrant({
+        client,
+        targetUserId: userId,
+        amount: input.grantAmounts[index],
+        requestedByAdminId: adminId,
+        approvedByAdminId: approverAdminId,
+        reason: 'E2E policy-v2 grant',
+      })
       await client.query(
         `INSERT INTO trip_deposits (trip_id, user_id, amount) VALUES ($1, $2, $3)`,
         [tripId, userId, input.depositAmount],
@@ -212,6 +229,7 @@ async function seedPolicyV2Settlement(input: {
     return {
       tripId,
       adminId,
+      approverAdminId,
       adminToken,
       hostId,
       memberOneId,

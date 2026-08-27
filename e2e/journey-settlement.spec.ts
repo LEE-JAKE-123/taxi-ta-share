@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { Pool } from '@neondatabase/serverless'
+import { seedApprovedDirectGrant } from './support/operational-fixtures'
 
 type JourneyFixture = {
   tripId: string
@@ -33,6 +34,7 @@ async function seedConfirmedJourney(): Promise<JourneyFixture> {
   const client = await pool.connect()
   const runId = `e2e-journey-${randomUUID()}`
   const adminId = randomUUID()
+  const approverAdminId = randomUUID()
   const hostId = randomUUID()
   const memberId = randomUUID()
   const noShowId = randomUUID()
@@ -46,6 +48,7 @@ async function seedConfirmedJourney(): Promise<JourneyFixture> {
     await client.query('BEGIN')
     const people = [
       [adminId, 'ADMIN', 'E2E Admin'],
+      [approverAdminId, 'ADMIN', 'E2E Grant Approver'],
       [hostId, 'USER', 'E2E Host'],
       [memberId, 'USER', 'E2E Member'],
       [noShowId, 'USER', 'E2E No Show'],
@@ -77,11 +80,14 @@ async function seedConfirmedJourney(): Promise<JourneyFixture> {
       )
     }
     for (const userId of participantIds) {
-      await client.query(
-        `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
-         VALUES ($1, 'ADMIN_GRANT', 7500, 0, NULL, $2, 'E2E journey grant', $3)`,
-        [userId, adminId, `${runId}:grant:${userId}`],
-      )
+      await seedApprovedDirectGrant({
+        client,
+        targetUserId: userId,
+        amount: 7500,
+        requestedByAdminId: adminId,
+        approvedByAdminId: approverAdminId,
+        reason: 'E2E journey grant',
+      })
     }
     await client.query(
       `INSERT INTO trip_groups (

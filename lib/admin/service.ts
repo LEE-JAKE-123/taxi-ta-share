@@ -205,7 +205,7 @@ export async function getAdminUsers(actorId: string) {
 
 export async function getAdminSafetyDashboard(actorId: string) {
   const sql = await requireAdminActor(actorId)
-  const [reports, tickets, counts] = await Promise.all([
+  const [reports, tripIncidents, tickets, counts] = await Promise.all([
     sql`
       SELECT
         r.report_id AS "reportId",
@@ -222,6 +222,60 @@ export async function getAdminSafetyDashboard(actorId: string) {
       LEFT JOIN users reported ON reported.user_id = r.reported_user_id
       WHERE r.status IN ('SUBMITTED', 'IN_REVIEW')
       ORDER BY r.created_at, r.report_id
+      LIMIT 100
+    `,
+    sql`
+      SELECT
+        i.incident_id AS "incidentId",
+        i.trip_id AS "tripId",
+        i.incident_type AS "incidentType",
+        reporter.name AS "reporterName",
+        reported.name AS "reportedName",
+        i.description,
+        i.evidence_ref AS "evidenceRef",
+        i.submitted_at AS "submittedAt",
+        rebuttal.statement AS "rebuttalStatement",
+        rebuttal.evidence_ref AS "rebuttalEvidenceRef",
+        command.command_type AS status,
+        command.created_at AS "commandCreatedAt",
+        command.admin_user_id AS "reviewAdminId",
+        execution.execution_id AS "noShowExecutionId",
+        no_start_execution.execution_id AS "noStartRefundExecutionId",
+        notification.notification_id AS "rebuttalNotificationId",
+        notification.rebuttal_deadline_at AS "rebuttalDeadlineAt",
+        coalesce(notification.rebuttal_deadline_at <= clock_timestamp(), false)
+          AS "rebuttalDeadlineExpired"
+      FROM trip_incidents i
+      JOIN users reporter ON reporter.user_id = i.reporter_user_id
+      JOIN users reported ON reported.user_id = i.reported_user_id
+      LEFT JOIN trip_incident_rebuttals rebuttal
+        ON rebuttal.incident_id = i.incident_id
+      LEFT JOIN LATERAL (
+        SELECT command_type, created_at, admin_user_id
+        FROM trip_incident_review_commands
+        WHERE incident_id = i.incident_id
+        ORDER BY created_at DESC, command_id DESC
+        LIMIT 1
+      ) command ON true
+      LEFT JOIN trip_incident_no_show_executions execution
+        ON execution.incident_id = i.incident_id
+      LEFT JOIN trip_incident_no_start_refund_executions no_start_execution
+        ON no_start_execution.incident_id = i.incident_id
+      LEFT JOIN trip_incident_review_notifications notification
+        ON notification.incident_id = i.incident_id
+      WHERE command.command_type IS NULL
+         OR command.command_type = 'START_REVIEW'
+         OR (
+           command.command_type = 'RESPONSIBILITY_CONFIRMED'
+           AND i.incident_type = 'MEMBER_NO_SHOW'
+           AND execution.execution_id IS NULL
+         )
+         OR (
+           command.command_type = 'RESPONSIBILITY_CONFIRMED'
+           AND i.incident_type = 'HOST_NO_START'
+           AND no_start_execution.execution_id IS NULL
+         )
+      ORDER BY i.submitted_at, i.incident_id
       LIMIT 100
     `,
     sql`
@@ -244,7 +298,36 @@ export async function getAdminSafetyDashboard(actorId: string) {
         (SELECT count(*)::int FROM user_reports
           WHERE status IN ('SUBMITTED', 'IN_REVIEW')) AS "reportCount",
         (SELECT count(*)::int FROM support_tickets
-          WHERE status IN ('SUBMITTED', 'IN_REVIEW')) AS "ticketCount"
+          WHERE status IN ('SUBMITTED', 'IN_REVIEW')) AS "ticketCount",
+        (SELECT count(*)::int
+          FROM trip_incidents i
+          WHERE NOT EXISTS (
+            SELECT 1 FROM trip_incident_review_commands c
+            WHERE c.incident_id = i.incident_id
+              AND c.command_type IN ('RESPONSIBILITY_CONFIRMED', 'NOT_ESTABLISHED')
+          ) OR (
+            i.incident_type = 'MEMBER_NO_SHOW'
+            AND EXISTS (
+              SELECT 1 FROM trip_incident_review_commands c
+              WHERE c.incident_id = i.incident_id
+                AND c.command_type = 'RESPONSIBILITY_CONFIRMED'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM trip_incident_no_show_executions e
+              WHERE e.incident_id = i.incident_id
+            )
+          ) OR (
+            i.incident_type = 'HOST_NO_START'
+            AND EXISTS (
+              SELECT 1 FROM trip_incident_review_commands c
+              WHERE c.incident_id = i.incident_id
+                AND c.command_type = 'RESPONSIBILITY_CONFIRMED'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM trip_incident_no_start_refund_executions e
+              WHERE e.incident_id = i.incident_id
+            )
+          )) AS "tripIncidentCount"
     `,
   ])
   return {
@@ -268,14 +351,36 @@ export async function getAdminSafetyDashboard(actorId: string) {
       status: string
       createdAt: string
     }>,
+    tripIncidents: tripIncidents as unknown as Array<{
+      incidentId: string
+      tripId: string
+      incidentType: string
+      reporterName: string
+      reportedName: string
+      description: string
+      evidenceRef: string | null
+      submittedAt: string
+      rebuttalStatement: string | null
+      rebuttalEvidenceRef: string | null
+      status: string | null
+      commandCreatedAt: string | null
+      reviewAdminId: string | null
+      noShowExecutionId: string | null
+      noStartRefundExecutionId: string | null
+      rebuttalNotificationId: string | null
+      rebuttalDeadlineAt: string | null
+      rebuttalDeadlineExpired: boolean
+    }>,
     counts: (counts[0] as
       | {
           reportCount: number
           ticketCount: number
+          tripIncidentCount: number
         }
       | undefined) ?? {
       reportCount: 0,
       ticketCount: 0,
+      tripIncidentCount: 0,
     },
   }
 }

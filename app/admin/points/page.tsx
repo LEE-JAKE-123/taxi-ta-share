@@ -1,11 +1,13 @@
 import { Gift, ShieldCheck } from 'lucide-react'
 import {
-  fulfillPointRequestAction,
+  approvePointGrantExecutionAction,
+  executePointGrantExecutionAction,
   grantPointsAction,
+  preparePointRequestFulfillmentAction,
 } from '@/app/core/actions'
 import { MobileShell } from '@/components/mobile-shell'
+import { PendingSubmitButton } from '@/components/pending-submit-button'
 import { TopBar } from '@/components/top-bar'
-import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { getAdminPointDashboard } from '@/lib/core/service'
 import { requireAdmin } from '@/lib/auth/session'
@@ -68,7 +70,10 @@ export default async function AdminPage({
 
         <form action={grantPointsAction}>
           <Card className="mb-7 flex flex-col gap-4 p-5">
-            <h2 className="text-sm font-bold">직접 지급</h2>
+            <h2 className="text-sm font-bold">직접 지급 실행 요청</h2>
+            <p className="text-xs text-muted-foreground">
+              다른 활성 관리자의 승인 후, 기안한 관리자가 원장 지급을 실행합니다.
+            </p>
             <input
               type="hidden"
               name="idempotencyKey"
@@ -129,28 +134,28 @@ export default async function AdminPage({
                 required
               />
             </div>
-            <Button
-              type="submit"
+            <PendingSubmitButton
+              pendingLabel="지급 실행 요청을 만드는 중…"
               className="h-12 w-full gap-2 rounded-xl text-base font-semibold"
             >
               <Gift className="size-5" aria-hidden />
-              포인트 지급
-            </Button>
+              지급 실행 요청 만들기
+            </PendingSubmitButton>
           </Card>
         </form>
 
         <section className="mb-7" aria-labelledby="pending-request-heading">
           <div className="mb-3 flex items-center justify-between">
             <h2 id="pending-request-heading" className="text-sm font-bold">
-              대기 중 지급 요청
+              사용자 지급 요청 · 실행 기안 대기
             </h2>
             <span className="text-xs text-muted-foreground">
-              {data.pendingRequests.length}건
+              {data.unpreparedRequests.length}건
             </span>
           </div>
-          {data.pendingRequests.length ? (
+          {data.unpreparedRequests.length ? (
             <div className="flex flex-col gap-3">
-              {data.pendingRequests.map((request) => (
+              {data.unpreparedRequests.map((request) => (
                 <Card key={request.requestId} className="p-4">
                   <p className="text-sm font-semibold">
                     {request.name} · {request.studentId}
@@ -167,15 +172,24 @@ export default async function AdminPage({
                         {formatDate(request.requestedAt)}
                       </p>
                     </div>
-                    <form action={fulfillPointRequestAction}>
+                    <form action={preparePointRequestFulfillmentAction}>
                       <input
                         type="hidden"
                         name="requestId"
                         value={request.requestId}
                       />
-                      <Button type="submit" className="min-h-11 px-4">
-                        승인·지급
-                      </Button>
+                      <input
+                        type="hidden"
+                        name="idempotencyKey"
+                        value={crypto.randomUUID()}
+                      />
+                      <PendingSubmitButton
+                        pendingLabel="실행 요청을 만드는 중…"
+                        className="min-h-11 w-auto px-4"
+                        ariaLabel={`${request.name} ${formatPoints(request.requestedAmount)} 지급 실행 요청 만들기`}
+                      >
+                        실행 요청 만들기
+                      </PendingSubmitButton>
                     </form>
                   </div>
                 </Card>
@@ -183,7 +197,106 @@ export default async function AdminPage({
             </div>
           ) : (
             <Card className="p-4 text-sm text-muted-foreground">
-              대기 중인 포인트 지급 요청이 없습니다.
+              실행 기안 대기 중인 사용자 요청이 없습니다.
+            </Card>
+          )}
+        </section>
+
+        <section className="mb-7" aria-labelledby="approval-queue-heading">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 id="approval-queue-heading" className="text-sm font-bold">
+              독립 승인 대기
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              {data.approvalQueue.length}건
+            </span>
+          </div>
+          {data.approvalQueue.length ? (
+            <div className="flex flex-col gap-3">
+              {data.approvalQueue.map((request) => (
+                <Card key={request.executionRequestId} className="p-4">
+                  <p className="text-sm font-semibold">
+                    {request.targetName} · {maskStudentId(request.targetStudentId)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    기안 관리자 {request.requestedByName} · {request.reason}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-extrabold text-primary">
+                        {formatPoints(request.amount)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(request.createdAt)}
+                      </p>
+                    </div>
+                    <form action={approvePointGrantExecutionAction}>
+                      <input type="hidden" name="executionRequestId" value={request.executionRequestId} />
+                      <input type="hidden" name="idempotencyKey" value={crypto.randomUUID()} />
+                      <PendingSubmitButton
+                        pendingLabel="독립 승인 중…"
+                        className="min-h-11 w-auto px-4"
+                        ariaLabel={`${request.targetName} ${formatPoints(request.amount)} 지급 기안 독립 승인`}
+                      >
+                        독립 승인
+                      </PendingSubmitButton>
+                    </form>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card className="p-4 text-sm text-muted-foreground">
+              독립 승인을 기다리는 지급 실행 요청이 없습니다.
+            </Card>
+          )}
+        </section>
+
+        <section className="mb-7" aria-labelledby="execution-queue-heading">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 id="execution-queue-heading" className="text-sm font-bold">
+              내가 실행할 승인 완료 지급
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              {data.executionQueue.length}건
+            </span>
+          </div>
+          {data.executionQueue.length ? (
+            <div className="flex flex-col gap-3">
+              {data.executionQueue.map((request) => (
+                <Card key={request.executionRequestId} className="p-4">
+                  <p className="text-sm font-semibold">
+                    {request.targetName} · {maskStudentId(request.targetStudentId)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    승인 관리자 {request.approverName} · {request.reason}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-extrabold text-primary">
+                        {formatPoints(request.amount)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        승인 {formatDate(request.approvedAt)}
+                      </p>
+                    </div>
+                    <form action={executePointGrantExecutionAction}>
+                      <input type="hidden" name="executionRequestId" value={request.executionRequestId} />
+                      <PendingSubmitButton
+                        pendingLabel="원장 지급을 실행하는 중…"
+                        className="min-h-11 w-auto px-4"
+                        ariaLabel={`${request.targetName} ${formatPoints(request.amount)} 승인 완료 지급 원장 실행`}
+                      >
+                        원장 지급 실행
+                      </PendingSubmitButton>
+                    </form>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card className="p-4 text-sm text-muted-foreground">
+              내가 실행할 승인 완료 지급이 없습니다.
             </Card>
           )}
         </section>
@@ -211,7 +324,9 @@ export default async function AdminPage({
                     {grant.reason}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    관리자 {grant.adminName} · {formatDate(grant.createdAt)}
+                    실행 {grant.executorName}
+                    {grant.approverName ? ` · 승인 ${grant.approverName}` : ' · 이전 지급 기록'}
+                    {' · '}{formatDate(grant.createdAt)}
                   </p>
                 </div>
                 <span className="shrink-0 text-sm font-bold text-mint">

@@ -5,7 +5,9 @@ import { Check, Clock, MapPin, UserX } from 'lucide-react'
 import {
   checkInAction,
   markNoShowAction,
+  reportHostNoStartAction,
   startTripAction,
+  submitTripIncidentRebuttalAction,
 } from '@/app/core/actions'
 import { Avatar } from '@/components/avatar'
 import { BottomBar } from '@/components/bottom-bar'
@@ -29,11 +31,15 @@ export default async function GatheringPage({
   const user = await requireCompleteUser()
   const [{ id }, query] = await Promise.all([params, searchParams])
   const journey = await getJourney(user.userId, id)
-  const { trip, participants } = journey
+  const { trip, participants, incidents } = journey
   const isHost = trip.hostUserId === user.userId
   const current = participants.find((item) => item.userId === user.userId)
   const canCheckIn =
     trip.status === 'IN_PROGRESS' && current?.status === 'DEPOSITED'
+  const canReportHostNoStart =
+    !isHost &&
+    trip.status === 'CONFIRMED' &&
+    new Date(trip.departureAt) <= new Date()
 
   return (
     <MobileShell withTabBar={false}>
@@ -117,12 +123,33 @@ export default async function GatheringPage({
                       name="idempotencyKey"
                       value={randomUUID()}
                     />
+                    <label className="mb-2 block text-xs font-semibold text-muted-foreground">
+                      신고 사유
+                      <textarea
+                        name="description"
+                        required
+                        minLength={10}
+                        maxLength={2000}
+                        rows={2}
+                        className="app-input mt-1 min-h-18 w-full resize-none px-3 py-2 text-sm"
+                        placeholder="집결 시각 이후에도 도착·응답이 없는 상황을 10자 이상 작성해 주세요."
+                      />
+                    </label>
+                    <label className="mb-2 block text-xs font-semibold text-muted-foreground">
+                      증빙 참조 (선택)
+                      <input
+                        name="evidenceRef"
+                        maxLength={2000}
+                        className="app-input mt-1 w-full px-3 py-2 text-sm"
+                        placeholder="사진 또는 대화 기록의 참조를 입력하세요"
+                      />
+                    </label>
                     <PendingSubmitButton
-                      pendingLabel="노쇼 기록 중..."
+                      pendingLabel="노쇼 신고 접수 중..."
                       className="min-h-10 bg-destructive py-2 text-sm text-destructive-foreground"
                     >
                       <UserX className="size-4" aria-hidden />
-                      노쇼 기록
+                      노쇼 신고 접수
                     </PendingSubmitButton>
                   </form>
                 ) : null}
@@ -130,6 +157,97 @@ export default async function GatheringPage({
             ))}
           </ul>
         </Card>
+
+        {incidents.length ? (
+          <Card className="gap-3">
+            <CardTitle>이동 사건 진행 상황</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              사건 접수와 반박·운영 검토는 사실관계 기록용입니다. 이 화면에서 포인트·예치금·정산·참여 상태는 변경되지 않습니다.
+            </p>
+            <ul className="flex flex-col gap-3">
+              {incidents.map((incident) => {
+                const terminal = [
+                  'RESPONSIBILITY_CONFIRMED',
+                  'NOT_ESTABLISHED',
+                ].includes(incident.commandType ?? '')
+                return (
+                  <li key={incident.incidentId} className="rounded-xl bg-muted/60 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {incident.incidentType === 'HOST_NO_START'
+                            ? '방장 미출발 사건'
+                            : '참여자 노쇼 사건'}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {incident.viewerRole === 'REPORTED' ? '대상자로 접수됨' : '내가 접수함'} · {incidentStatusLabel(incident.commandType)}
+                        </p>
+                      </div>
+                      <StatusBadge tone={terminal ? 'muted' : 'warn'}>
+                        {incidentStatusLabel(incident.commandType)}
+                      </StatusBadge>
+                    </div>
+                    {incident.viewerRole === 'REPORTER' && incident.description ? (
+                      <p className="mt-3 text-sm leading-relaxed">{incident.description}</p>
+                    ) : null}
+                    {incident.viewerRole === 'REPORTED' && incident.rebuttalOpen ? (
+                      <form action={submitTripIncidentRebuttalAction} className="mt-3 border-t border-border pt-3">
+                        <p className="mb-2 text-xs font-medium text-warn">
+                          반박 기한: {new Intl.DateTimeFormat('ko-KR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }).format(new Date(incident.rebuttalDeadlineAt!))}까지
+                        </p>
+                        <input type="hidden" name="tripId" value={trip.tripId} />
+                        <input type="hidden" name="incidentId" value={incident.incidentId} />
+                        <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                        <label className="mb-2 block text-xs font-semibold">
+                          반박 내용
+                          <textarea
+                            name="statement"
+                            required
+                            minLength={10}
+                            maxLength={2000}
+                            rows={3}
+                            className="app-input mt-1 min-h-20 w-full resize-y px-3 py-2 text-sm"
+                            placeholder="사건에 대한 본인의 설명을 10자 이상 작성해 주세요."
+                          />
+                        </label>
+                        <label className="mb-2 block text-xs font-semibold">
+                          증빙 참조 (선택)
+                          <input
+                            name="evidenceRef"
+                            maxLength={2000}
+                            className="app-input mt-1 w-full px-3 py-2 text-sm"
+                            placeholder="사진 또는 대화 기록의 참조를 입력하세요"
+                          />
+                        </label>
+                        <PendingSubmitButton pendingLabel="반박 접수 중..." className="min-h-10 py-2 text-sm">
+                          반박 제출
+                        </PendingSubmitButton>
+                      </form>
+                    ) : null}
+                    {incident.viewerRole === 'REPORTED' &&
+                    incident.commandType === 'START_REVIEW' &&
+                    !incident.hasRebuttal &&
+                    !incident.rebuttalOpen ? (
+                      <p className="mt-3 text-xs font-medium text-muted-foreground">
+                        {incident.rebuttalDeadlineAt
+                          ? '반박 기한이 지났습니다. 운영 검토 결과를 기다려 주세요.'
+                          : '반박 기회를 준비 중입니다. 잠시 후 다시 확인해 주세요.'}
+                      </p>
+                    ) : null}
+                    {incident.viewerRole === 'REPORTED' && incident.hasRebuttal ? (
+                      <p className="mt-3 text-xs font-medium text-muted-foreground">
+                        반박이 접수되었습니다. 운영 검토 결과를 기다려 주세요.
+                      </p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </Card>
+        ) : null}
       </main>
 
       <BottomBar className="flex flex-col gap-2">
@@ -143,6 +261,45 @@ export default async function GatheringPage({
             />
             <PendingSubmitButton pendingLabel="이동 시작 중...">
               이동 시작
+            </PendingSubmitButton>
+          </form>
+        ) : null}
+        {canReportHostNoStart ? (
+          <form action={reportHostNoStartAction} className="rounded-xl border border-destructive/30 bg-warn-soft p-3">
+            <input type="hidden" name="tripId" value={trip.tripId} />
+            <input type="hidden" name="hostId" value={trip.hostUserId} />
+            <input
+              type="hidden"
+              name="idempotencyKey"
+              value={randomUUID()}
+            />
+            <label className="mb-2 block text-xs font-semibold">
+              방장 미출발 신고 사유
+              <textarea
+                name="description"
+                required
+                minLength={10}
+                maxLength={2000}
+                rows={2}
+                className="app-input mt-1 min-h-18 w-full resize-none px-3 py-2 text-sm"
+                placeholder="출발 시각 이후 이동이 시작되지 않은 상황을 작성해 주세요."
+              />
+            </label>
+            <label className="mb-2 block text-xs font-semibold">
+              증빙 참조 (선택)
+              <input
+                name="evidenceRef"
+                maxLength={2000}
+                className="app-input mt-1 w-full px-3 py-2 text-sm"
+                placeholder="사진 또는 대화 기록의 참조를 입력하세요"
+              />
+            </label>
+            <PendingSubmitButton
+              pendingLabel="미출발 신고 접수 중..."
+              className="min-h-10 w-full bg-destructive py-2 text-sm text-destructive-foreground"
+            >
+              <UserX className="size-4" aria-hidden />
+              방장 미출발 신고 접수
             </PendingSubmitButton>
           </form>
         ) : null}
@@ -213,4 +370,11 @@ function ParticipantBadge({ status }: { status: string }) {
       대기 중
     </StatusBadge>
   )
+}
+
+function incidentStatusLabel(status: string | null) {
+  if (status === 'START_REVIEW') return '운영 검토 중'
+  if (status === 'RESPONSIBILITY_CONFIRMED') return '귀책 확인 기록'
+  if (status === 'NOT_ESTABLISHED') return '귀책 불인정 기록'
+  return '접수됨'
 }

@@ -3,6 +3,7 @@ export type RoutingErrorCode =
   | 'NOT_CONFIGURED'
   | 'NOT_FOUND'
   | 'TIMEOUT'
+  | 'RATE_LIMITED'
   | 'UPSTREAM_FAILURE'
   | 'MALFORMED_RESPONSE'
 
@@ -11,6 +12,7 @@ export class RoutingError extends Error {
     readonly code: RoutingErrorCode,
     message: string,
     readonly retryable = false,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message)
     this.name = 'RoutingError'

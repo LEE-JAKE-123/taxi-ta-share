@@ -29,6 +29,9 @@ Object.assign(process.env, {
   CRON_SECRET: randomBytes(32).toString('base64url'),
 })
 
+let failedExitCode = 0
+let spawnError
+
 for (const [command, args] of [
   [process.execPath, ['scripts/migrate.mjs']],
   [process.execPath, ['scripts/verify-db.mjs']],
@@ -42,6 +45,26 @@ for (const [command, args] of [
   ],
 ]) {
   const result = spawnSync(command, args, { stdio: 'inherit', env: process.env })
-  if (result.error) throw result.error
-  if (result.status !== 0) process.exit(result.status ?? 1)
+  if (result.error) {
+    spawnError = result.error
+    break
+  }
+  if (result.status !== 0) {
+    failedExitCode = result.status ?? 1
+    break
+  }
 }
+
+// Playwright starts an isolated Next development server whose generated route
+// declarations temporarily become the active declarations in next-env.d.ts.
+// Restore the normal production type declarations before returning to callers.
+const typegenResult = spawnSync(
+  process.execPath,
+  ['node_modules/next/dist/bin/next', 'typegen'],
+  { stdio: 'inherit', env: process.env },
+)
+
+if (spawnError) throw spawnError
+if (failedExitCode !== 0) process.exit(failedExitCode)
+if (typegenResult.error) throw typegenResult.error
+if (typegenResult.status !== 0) process.exit(typegenResult.status ?? 1)

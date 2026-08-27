@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { RoutingError } from './errors'
-import { routingErrorMessage, routingErrorStatus } from './response'
+import {
+  routingErrorMessage,
+  routingErrorStatus,
+  routingRetryAfter,
+} from './response'
 
 describe('routing error response normalization', () => {
   it.each([
     ['INVALID_INPUT', 400],
     ['NOT_FOUND', 404],
     ['NOT_CONFIGURED', 503],
+    ['RATE_LIMITED', 429],
     ['TIMEOUT', 502],
     ['UPSTREAM_FAILURE', 502],
     ['MALFORMED_RESPONSE', 502],
@@ -21,5 +26,14 @@ describe('routing error response normalization', () => {
       'secret upstream payload',
     )
     expect(routingErrorMessage(error)).not.toContain('secret')
+  })
+
+  it('exposes retry-after only for a rate-limited provider', () => {
+    expect(
+      routingRetryAfter(new RoutingError('RATE_LIMITED', 'limited', true, 12)),
+    ).toBe(12)
+    expect(
+      routingRetryAfter(new RoutingError('UPSTREAM_FAILURE', 'failed', true)),
+    ).toBeUndefined()
   })
 })

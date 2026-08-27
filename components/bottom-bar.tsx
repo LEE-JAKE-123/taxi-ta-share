@@ -12,7 +12,7 @@ export function BottomBar({
     <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1280px]">
       <div
         className={cn(
-          'border-t border-hairline bg-surface/90 px-5 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 backdrop-blur-xl backdrop-saturate-150',
+          'safe-area-bottom-4 border-t border-hairline bg-surface/90 px-5 pt-3 backdrop-blur-xl backdrop-saturate-150',
           className,
         )}
       >

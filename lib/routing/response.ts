@@ -5,7 +5,15 @@ export function routingErrorStatus(error: unknown) {
   if (error.code === 'INVALID_INPUT') return 400
   if (error.code === 'NOT_FOUND') return 404
   if (error.code === 'NOT_CONFIGURED') return 503
+  if (error.code === 'RATE_LIMITED') return 429
   return 502
+}
+
+export function routingRetryAfter(error: unknown) {
+  if (!(error instanceof RoutingError) || error.code !== 'RATE_LIMITED') {
+    return undefined
+  }
+  return error.retryAfterSeconds
 }
 
 export function routingErrorMessage(error: unknown) {

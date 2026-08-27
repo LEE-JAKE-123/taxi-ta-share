@@ -7,7 +7,6 @@ import { resolveTripClosureStatus } from '@/lib/core/trip-validation'
 import { calculateDemoFinalShare } from '@/lib/core/journey'
 import {
   isPointRequestUuid,
-  matchesGrantLedgerPayload,
   MAX_POINT_AMOUNT,
   normalizePointReason,
   parsePointAmount,
@@ -271,7 +270,7 @@ export async function getCoreDashboard(userId: string, isAdmin: boolean) {
 export async function getTripJourney(userId: string, tripId: string) {
   await ensureDatabaseIdentity()
   const sql = getDatabase()
-  const [tripRows, participantRows, settlementRows, ledgerRows] =
+  const [tripRows, participantRows, settlementRows, ledgerRows, incidentRows] =
     await Promise.all([
       sql`
         SELECT
@@ -398,6 +397,49 @@ export async function getTripJourney(userId: string, tripId: string) {
           )
         ORDER BY created_at
       `,
+      sql`
+        SELECT
+          i.incident_id AS "incidentId",
+          i.incident_type AS "incidentType",
+          i.submitted_at AS "submittedAt",
+          CASE
+            WHEN i.reporter_user_id = ${userId} THEN 'REPORTER'
+            ELSE 'REPORTED'
+          END AS "viewerRole",
+          CASE WHEN i.reporter_user_id = ${userId} THEN i.description ELSE NULL END
+            AS "description",
+          CASE WHEN i.reporter_user_id = ${userId} THEN i.evidence_ref ELSE NULL END
+            AS "evidenceRef",
+          rebuttal.rebuttal_id IS NOT NULL AS "hasRebuttal",
+          CASE WHEN i.reported_user_id = ${userId} THEN rebuttal.statement ELSE NULL END
+            AS "rebuttalStatement",
+          CASE WHEN i.reported_user_id = ${userId} THEN rebuttal.evidence_ref ELSE NULL END
+            AS "rebuttalEvidenceRef",
+          command.command_type AS "commandType",
+          command.created_at AS "commandCreatedAt",
+          notification.exposed_at AS "rebuttalNoticePublishedAt",
+          notification.rebuttal_deadline_at AS "rebuttalDeadlineAt",
+          coalesce((
+            command.command_type = 'START_REVIEW'
+            AND rebuttal.rebuttal_id IS NULL
+            AND notification.rebuttal_deadline_at > clock_timestamp()
+          ), false) AS "rebuttalOpen"
+        FROM trip_incidents i
+        LEFT JOIN trip_incident_rebuttals rebuttal
+          ON rebuttal.incident_id = i.incident_id
+        LEFT JOIN LATERAL (
+          SELECT command_type, created_at
+          FROM trip_incident_review_commands
+          WHERE incident_id = i.incident_id
+          ORDER BY created_at DESC, command_id DESC
+          LIMIT 1
+        ) command ON true
+        LEFT JOIN trip_incident_review_notifications notification
+          ON notification.incident_id = i.incident_id
+        WHERE i.trip_id = ${tripId}
+          AND ${userId} IN (i.reporter_user_id, i.reported_user_id)
+        ORDER BY i.submitted_at DESC, i.incident_id DESC
+      `,
     ])
 
   const trip = tripRows[0] as
@@ -455,6 +497,22 @@ export async function getTripJourney(userId: string, tripId: string) {
       heldDelta: number
       reason: string
       createdAt: string
+    }>,
+    incidents: incidentRows as unknown as Array<{
+      incidentId: string
+      incidentType: TripIncidentType
+      submittedAt: string
+      viewerRole: 'REPORTER' | 'REPORTED'
+      description: string | null
+      evidenceRef: string | null
+      hasRebuttal: boolean
+      rebuttalStatement: string | null
+      rebuttalEvidenceRef: string | null
+      commandType: TripIncidentReviewCommandType | null
+      commandCreatedAt: string | null
+      rebuttalNoticePublishedAt: string | null
+      rebuttalDeadlineAt: string | null
+      rebuttalOpen: boolean
     }>,
   }
 }
@@ -566,7 +624,7 @@ export async function getAdminPointDashboard(actorId: string) {
   if (!actorRows.length) {
     throw new CoreError('활성 관리자만 관리자 정보를 조회할 수 있습니다.')
   }
-  const [users, grants, pendingRequests, totals] = await Promise.all([
+  const [users, grants, unpreparedRequests, approvalQueue, executionQueue, totals] = await Promise.all([
     sql`
       SELECT
         user_id AS "userId",
@@ -582,9 +640,8 @@ export async function getAdminPointDashboard(actorId: string) {
           'route api',
           'production verification',
           'production verfication'
-        )
+      )
       ORDER BY name, student_id
-      LIMIT 200
     `,
     sql`
       SELECT
@@ -594,10 +651,14 @@ export async function getAdminPointDashboard(actorId: string) {
         l.created_at AS "createdAt",
         target.name AS "targetName",
         target.student_id AS "targetStudentId",
-        actor.name AS "adminName"
+        executor.name AS "executorName",
+        approver.name AS "approverName"
       FROM point_ledger l
       JOIN users target ON target.user_id = l.user_id
-      JOIN users actor ON actor.user_id = l.actor_user_id
+      JOIN users executor ON executor.user_id = l.actor_user_id
+      LEFT JOIN point_grant_approval_commands approval
+        ON approval.approval_command_id = l.grant_approval_command_id
+      LEFT JOIN users approver ON approver.user_id = approval.approved_by_admin_id
       WHERE l.entry_type = 'ADMIN_GRANT'
       ORDER BY l.created_at DESC, l.ledger_id DESC
       LIMIT 100
@@ -614,7 +675,49 @@ export async function getAdminPointDashboard(actorId: string) {
       FROM point_grant_requests r
       JOIN users u ON u.user_id = r.requester_user_id
       WHERE r.status = 'PENDING'
+        AND NOT EXISTS (
+          SELECT 1 FROM point_grant_execution_requests e
+          WHERE e.source_point_request_id = r.request_id
+        )
       ORDER BY r.requested_at, r.request_id
+      LIMIT 100
+    `,
+    sql`
+      SELECT
+        e.execution_request_id AS "executionRequestId",
+        e.amount, e.reason, e.created_at AS "createdAt",
+        e.source_point_request_id AS "sourcePointRequestId",
+        target.name AS "targetName", target.student_id AS "targetStudentId",
+        requester.name AS "requestedByName"
+      FROM point_grant_execution_requests e
+      JOIN users target ON target.user_id = e.target_user_id
+      JOIN users requester ON requester.user_id = e.requested_by_admin_id
+      WHERE e.requested_by_admin_id <> ${actorId}
+        AND NOT EXISTS (
+        SELECT 1 FROM point_grant_approval_commands a
+        WHERE a.execution_request_id = e.execution_request_id
+      )
+      ORDER BY e.created_at, e.execution_request_id
+      LIMIT 100
+    `,
+    sql`
+      SELECT
+        e.execution_request_id AS "executionRequestId",
+        e.amount, e.reason, e.created_at AS "createdAt",
+        e.source_point_request_id AS "sourcePointRequestId",
+        target.name AS "targetName", target.student_id AS "targetStudentId",
+        approver.name AS "approverName", a.approved_at AS "approvedAt"
+      FROM point_grant_execution_requests e
+      JOIN point_grant_approval_commands a
+        ON a.execution_request_id = e.execution_request_id
+      JOIN users target ON target.user_id = e.target_user_id
+      JOIN users approver ON approver.user_id = a.approved_by_admin_id
+      WHERE e.requested_by_admin_id = ${actorId}
+        AND NOT EXISTS (
+          SELECT 1 FROM point_ledger l
+          WHERE l.grant_execution_request_id = e.execution_request_id
+        )
+      ORDER BY a.approved_at, e.execution_request_id
       LIMIT 100
     `,
     sql`
@@ -637,9 +740,10 @@ export async function getAdminPointDashboard(actorId: string) {
       createdAt: string
       targetName: string
       targetStudentId: string
-      adminName: string
+      executorName: string
+      approverName: string | null
     }>,
-    pendingRequests: pendingRequests as unknown as Array<{
+    unpreparedRequests: unpreparedRequests as unknown as Array<{
       requestId: string
       requestedAmount: number
       reason: string
@@ -647,6 +751,27 @@ export async function getAdminPointDashboard(actorId: string) {
       userId: string
       name: string
       studentId: string
+    }>,
+    approvalQueue: approvalQueue as unknown as Array<{
+      executionRequestId: string
+      amount: number
+      reason: string
+      createdAt: string
+      sourcePointRequestId: string | null
+      targetName: string
+      targetStudentId: string
+      requestedByName: string
+    }>,
+    executionQueue: executionQueue as unknown as Array<{
+      executionRequestId: string
+      amount: number
+      reason: string
+      createdAt: string
+      sourcePointRequestId: string | null
+      targetName: string
+      targetStudentId: string
+      approverName: string
+      approvedAt: string
     }>,
     totalGranted: Number(
       (totals[0] as { totalGranted?: string } | undefined)?.totalGranted ?? 0,
@@ -920,6 +1045,11 @@ export async function getPolicyV2UsageEligibility(
 
 export async function assertPolicyV2UsageEligible(userId: string) {
   const eligibility = await getPolicyV2UsageEligibility(userId)
+  assertPolicyV2UsageEligibility(eligibility)
+  return eligibility
+}
+
+function assertPolicyV2UsageEligibility(eligibility: PolicyV2UsageEligibility) {
   if (!eligibility.eligible) {
     throw new CoreError(
       eligibility.reason === 'OPEN_DISPUTE_LIMIT'
@@ -927,6 +1057,39 @@ export async function assertPolicyV2UsageEligible(userId: string) {
         : '미상환 외상이 있어 정상 이용을 할 수 없습니다.',
     )
   }
+}
+
+/** Rechecks DEC-014 within the SERIALIZABLE transaction before a use write. */
+async function assertPolicyV2UsageEligibleForWrite(
+  client: PoolClient,
+  userId: string,
+) {
+  const debts = await client.query(
+    `SELECT d.trip_id, d.fare_revision
+     FROM point_debt_obligations d
+     WHERE d.user_id = $1 AND d.status = 'OPEN'
+     FOR UPDATE OF d`,
+    [userId],
+  )
+  const disputes = await client.query(
+    `SELECT trip_id, fare_revision
+     FROM fare_disputes
+     WHERE user_id = $1 AND status = 'OPEN'
+     FOR UPDATE`,
+    [userId],
+  )
+  const disputedDebtKeys = new Set(
+    disputes.rows.map((dispute) => `${dispute.trip_id}:${dispute.fare_revision}`),
+  )
+  const contestedDebtCount = debts.rows.filter(
+    (debt) => disputedDebtKeys.has(`${debt.trip_id}:${debt.fare_revision}`),
+  ).length
+  const eligibility = policyV2UsageEligibilityFromCounts({
+    openDisputeCount: disputes.rowCount ?? 0,
+    contestedDebtCount,
+    uncontestedDebtCount: (debts.rowCount ?? 0) - contestedDebtCount,
+  })
+  assertPolicyV2UsageEligibility(eligibility)
   return eligibility
 }
 
@@ -1459,10 +1622,12 @@ export async function createTrip(input: {
     const actor = await client.query(
       `SELECT 1 FROM users WHERE user_id = $1 AND account_status = 'ACTIVE'
        AND btrim(student_id) <> '' AND btrim(name) <> ''
-       AND btrim(school_email) <> '' FOR SHARE`,
+       AND btrim(school_email) <> '' FOR UPDATE`,
       [input.actorId],
     )
     if (!actor.rowCount) throw new CoreError('가입 필수 정보를 완료한 사용자만 방을 만들 수 있습니다.')
+
+    await assertPolicyV2UsageEligibleForWrite(client, input.actorId)
 
     const created = await client.query(
       `INSERT INTO trip_groups (
@@ -1556,7 +1721,7 @@ export async function applyToTrip(
          AND btrim(student_id) <> ''
          AND btrim(name) <> ''
          AND btrim(school_email) <> ''
-       FOR SHARE`,
+       FOR UPDATE`,
       [actorId],
     )
     if (!actor.rowCount) {
@@ -1581,6 +1746,7 @@ export async function applyToTrip(
     if (blocked.rowCount) {
       throw new CoreError('차단 관계가 있는 사용자와는 새 동승을 신청할 수 없습니다.')
     }
+    await assertPolicyV2UsageEligibleForWrite(client, actorId)
     const inserted = await client.query(
       `INSERT INTO trip_participants
          (trip_id, user_id, role, status, application_idempotency_key)
@@ -1837,28 +2003,21 @@ export async function closeDueTrips() {
   return inTransaction(async (client) => {
     const result = await client.query(
       `WITH due AS (
-         SELECT g.trip_id,
-                (
-                  SELECT count(*)::int
-                  FROM trip_participants p
-                  WHERE p.trip_id = g.trip_id
-                    AND p.status IN (
-                      'APPROVED', 'DEPOSITED', 'CHECKED_IN', 'COMPLETED'
-                    )
-                ) AS participant_count
+         SELECT g.trip_id
          FROM trip_groups g
-         WHERE g.status = 'OPEN' AND g.departure_at <= now()
+         WHERE g.status IN ('OPEN', 'CLOSED')
+           AND g.departure_at <= clock_timestamp()
+           AND NOT EXISTS (
+             SELECT 1 FROM trip_deposits d WHERE d.trip_id = g.trip_id
+           )
          ORDER BY g.departure_at
          LIMIT 100
          FOR UPDATE OF g SKIP LOCKED
        )
        UPDATE trip_groups g
-       SET status = CASE
-             WHEN due.participant_count >= 2 THEN 'CLOSED'
-             ELSE 'EXPIRED'
-           END,
-           closed_at = now(),
-           closure_type = 'AUTO'
+       SET status = 'EXPIRED',
+           closed_at = COALESCE(g.closed_at, now()),
+           closure_type = COALESCE(g.closure_type, 'AUTO')
        FROM due
        WHERE g.trip_id = due.trip_id
        RETURNING g.trip_id`,
@@ -1877,6 +2036,7 @@ export async function confirmTripAndDeposit(
   const snapshots = await sql`
     SELECT host_user_id AS "hostUserId", status,
            confirmation_idempotency_key AS "confirmationIdempotencyKey",
+           departure_at AS "departureAt",
            location_revision AS "locationRevision",
            origin_latitude::float8 AS "originLatitude",
            origin_longitude::float8 AS "originLongitude",
@@ -1889,6 +2049,7 @@ export async function confirmTripAndDeposit(
         hostUserId: string
         status: string
         confirmationIdempotencyKey: string | null
+        departureAt: string
         locationRevision: string
         originLatitude: number | null
         originLongitude: number | null
@@ -1905,6 +2066,9 @@ export async function confirmTripAndDeposit(
   ) return
   if (snapshot.status !== 'CLOSED') {
     throw new CoreError('종료된 모집만 확정할 수 있습니다.')
+  }
+  if (new Date(snapshot.departureAt) <= new Date()) {
+    throw new CoreError('출발 시각이 지나 모집을 확정할 수 없습니다.')
   }
   if (
     snapshot.originLatitude === null ||
@@ -1938,6 +2102,7 @@ export async function confirmTripAndDeposit(
       `SELECT
          g.host_user_id,
          g.status,
+         g.departure_at,
          g.estimated_fare,
          g.max_participants,
          g.confirmation_idempotency_key,
@@ -1960,6 +2125,9 @@ export async function confirmTripAndDeposit(
       row.host_user_id === actorId &&
       row.status === 'CLOSED'
     ) {
+      if (new Date(row.departure_at) <= new Date()) {
+        throw new CoreError('출발 시각이 지나 모집을 확정할 수 없습니다.')
+      }
       if (row.location_revision !== snapshot.locationRevision) {
         throw new CoreError('장소가 변경되었습니다. 예상 요금을 다시 확인해 주세요.')
       }
@@ -2219,7 +2387,7 @@ async function repayOpenPointDebtsFromGrant(
   return plan
 }
 
-export async function grantPoints(input: {
+export async function createPointGrantExecutionRequest(input: {
   adminId: string
   targetUserId: string
   amount: number
@@ -2254,7 +2422,7 @@ export async function grantPoints(input: {
     const admin = actors.rows.find((row) => row.user_id === input.adminId)
     const target = actors.rows.find((row) => row.user_id === input.targetUserId)
     if (admin?.role !== 'ADMIN' || admin.account_status !== 'ACTIVE') {
-      throw new CoreError('활성 관리자만 포인트를 지급할 수 있습니다.')
+      throw new CoreError('활성 관리자만 지급 실행 요청을 만들 수 있습니다.')
     }
     if (
       !target ||
@@ -2268,65 +2436,37 @@ export async function grantPoints(input: {
         'production verfication',
       ].includes(String(target.name ?? '').trim().toLowerCase())
     ) {
-      throw new CoreError('활성 일반 사용자에게만 포인트를 지급할 수 있습니다.')
+      throw new CoreError('활성 일반 사용자에게만 지급 실행 요청을 만들 수 있습니다.')
     }
 
-    const ledgerKey = `grant:${input.adminId}:${input.idempotencyKey}`
-    const lockedDebts = await lockOpenPointDebtsForRepayment(
-      client,
-      input.targetUserId,
-    )
     const inserted = await client.query(
-      `INSERT INTO point_ledger (
-         user_id, entry_type, available_delta, held_delta, actor_user_id,
-         reason, idempotency_key
-       ) VALUES ($1, 'ADMIN_GRANT', $2, 0, $3, $4, $5)
-       ON CONFLICT (idempotency_key) DO NOTHING
-       RETURNING ledger_id`,
-      [input.targetUserId, amount, input.adminId, reason, ledgerKey],
+      `INSERT INTO point_grant_execution_requests (
+         target_user_id, amount, reason, requested_by_admin_id, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT DO NOTHING
+       RETURNING execution_request_id`,
+      [input.targetUserId, amount, reason, input.adminId, input.idempotencyKey],
     )
-    if (inserted.rowCount) {
-      await repayOpenPointDebtsFromGrant(client, {
-        userId: input.targetUserId,
-        adminId: input.adminId,
-        amount,
-        reason,
-        grantIdempotencyKey: ledgerKey,
-        lockedDebts,
-      })
-      return inserted.rows[0].ledger_id as string
-    }
+    if (inserted.rowCount) return inserted.rows[0].execution_request_id as string
 
     const existing = await client.query(
-      `SELECT
-         ledger_id AS "ledgerId",
-         user_id AS "userId",
-         available_delta AS "availableDelta",
-         held_delta AS "heldDelta",
-         actor_user_id AS "actorUserId",
-         reason,
-         point_request_id AS "pointRequestId"
-       FROM point_ledger
-       WHERE idempotency_key = $1`,
-      [ledgerKey],
+      `SELECT execution_request_id, target_user_id, amount, reason
+       FROM point_grant_execution_requests
+       WHERE requested_by_admin_id = $1 AND idempotency_key = $2`,
+      [input.adminId, input.idempotencyKey],
     )
     const row = existing.rows[0]
     if (
       !row ||
-      !matchesGrantLedgerPayload(row, {
-        userId: input.targetUserId,
-        availableDelta: amount,
-        heldDelta: 0,
-        actorUserId: input.adminId,
-        reason,
-        pointRequestId: null,
-      })
+      row.target_user_id !== input.targetUserId ||
+      Number(row.amount) !== amount ||
+      row.reason !== reason
     ) {
       throw new CoreError(
-        '동일한 요청 식별자가 다른 지급 내용에 이미 사용되었습니다.',
+        '동일한 요청 식별자가 다른 지급 실행 요청에 이미 사용되었습니다.',
       )
     }
-    return row.ledgerId as string
+    return row.execution_request_id as string
   })
 }
 
@@ -2402,13 +2542,15 @@ export async function requestPoints(input: {
   })
 }
 
-export async function fulfillPointRequest(input: {
+export async function preparePointRequestFulfillment(input: {
   adminId: string
   requestId: string
+  idempotencyKey: string
 }) {
   if (
     !isPointRequestUuid(input.adminId) ||
-    !isPointRequestUuid(input.requestId)
+    !isPointRequestUuid(input.requestId) ||
+    !isPointRequestUuid(input.idempotencyKey)
   ) {
     throw new CoreError('포인트 지급 요청 식별자가 올바르지 않습니다.')
   }
@@ -2428,7 +2570,9 @@ export async function fulfillPointRequest(input: {
     )
     const row = request.rows[0]
     if (!row) throw new CoreError('포인트 지급 요청을 찾을 수 없습니다.')
-    if (row.status === 'FULFILLED') return row.fulfilled_ledger_id as string
+    if (row.status === 'FULFILLED') {
+      throw new CoreError('이미 지급이 완료된 요청입니다.')
+    }
 
     const users = await client.query(
       `SELECT user_id, role, account_status
@@ -2443,7 +2587,7 @@ export async function fulfillPointRequest(input: {
       (user) => user.user_id === row.requester_user_id,
     )
     if (admin?.role !== 'ADMIN' || admin.account_status !== 'ACTIVE') {
-      throw new CoreError('활성 관리자만 포인트 요청을 처리할 수 있습니다.')
+      throw new CoreError('활성 관리자만 지급 실행 요청을 만들 수 있습니다.')
     }
     if (
       !target ||
@@ -2451,77 +2595,207 @@ export async function fulfillPointRequest(input: {
       target.role !== 'USER' ||
       target.user_id === input.adminId
     ) {
-      throw new CoreError('활성 일반 사용자의 요청만 처리할 수 있습니다.')
+      throw new CoreError('활성 일반 사용자의 요청만 실행 요청으로 만들 수 있습니다.')
     }
 
-    const requestedAmount = Number(row.requested_amount)
-    const lockedDebts = await lockOpenPointDebtsForRepayment(
-      client,
-      row.requester_user_id as string,
+    const inserted = await client.query(
+      `INSERT INTO point_grant_execution_requests (
+       source_point_request_id, target_user_id, amount, reason,
+         requested_by_admin_id, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT DO NOTHING
+       RETURNING execution_request_id`,
+      [
+        input.requestId,
+        row.requester_user_id,
+        Number(row.requested_amount),
+        row.reason,
+        input.adminId,
+        input.idempotencyKey,
+      ],
     )
-    const ledgerKey = `point-request:${input.requestId}`
-    const ledger = await client.query(
+    if (inserted.rowCount) return inserted.rows[0].execution_request_id as string
+
+    const existing = await client.query(
+      `SELECT execution_request_id, source_point_request_id
+       FROM point_grant_execution_requests
+       WHERE requested_by_admin_id = $1 AND idempotency_key = $2`,
+      [input.adminId, input.idempotencyKey],
+    )
+    const existingRow = existing.rows[0]
+    if (
+      !existingRow ||
+      existingRow.source_point_request_id !== input.requestId
+    ) {
+      throw new CoreError('이 사용자 요청은 이미 다른 관리자가 지급 실행 요청으로 기안했습니다.')
+    }
+    return existingRow.execution_request_id as string
+  })
+}
+
+export async function approvePointGrantExecution(input: {
+  adminId: string
+  executionRequestId: string
+  idempotencyKey: string
+}) {
+  if (
+    !isPointRequestUuid(input.adminId) ||
+    !isPointRequestUuid(input.executionRequestId) ||
+    !isPointRequestUuid(input.idempotencyKey)
+  ) {
+    throw new CoreError('포인트 지급 승인 식별자가 올바르지 않습니다.')
+  }
+  return inTransaction(async (client) => {
+    const execution = await client.query(
+      `SELECT execution_request_id, requested_by_admin_id
+       FROM point_grant_execution_requests
+       WHERE execution_request_id = $1
+       FOR UPDATE`,
+      [input.executionRequestId],
+    )
+    const executionRow = execution.rows[0]
+    if (!executionRow) throw new CoreError('지급 실행 요청을 찾을 수 없습니다.')
+
+    const approver = await client.query(
+      `SELECT role, account_status
+       FROM users WHERE user_id = $1 FOR UPDATE`,
+      [input.adminId],
+    )
+    if (
+      approver.rows[0]?.role !== 'ADMIN' ||
+      approver.rows[0]?.account_status !== 'ACTIVE'
+    ) {
+      throw new CoreError('활성 관리자만 지급 실행 요청을 승인할 수 있습니다.')
+    }
+    if (executionRow.requested_by_admin_id === input.adminId) {
+      throw new CoreError('기안한 지급 실행 요청은 직접 승인할 수 없습니다.')
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO point_grant_approval_commands (
+         execution_request_id, approved_by_admin_id, idempotency_key
+       ) VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING
+       RETURNING approval_command_id`,
+      [input.executionRequestId, input.adminId, input.idempotencyKey],
+    )
+    if (inserted.rowCount) return inserted.rows[0].approval_command_id as string
+
+    const existing = await client.query(
+      `SELECT approval_command_id, execution_request_id
+       FROM point_grant_approval_commands
+       WHERE approved_by_admin_id = $1 AND idempotency_key = $2`,
+      [input.adminId, input.idempotencyKey],
+    )
+    const row = existing.rows[0]
+    if (!row || row.execution_request_id !== input.executionRequestId) {
+      throw new CoreError('동일한 요청 식별자가 다른 지급 승인에 이미 사용되었습니다.')
+    }
+    return row.approval_command_id as string
+  })
+}
+
+export async function executePointGrantExecution(input: {
+  adminId: string
+  executionRequestId: string
+}) {
+  if (
+    !isPointRequestUuid(input.adminId) ||
+    !isPointRequestUuid(input.executionRequestId)
+  ) {
+    throw new CoreError('포인트 지급 실행 식별자가 올바르지 않습니다.')
+  }
+  return inTransaction(async (client) => {
+    const execution = await client.query(
+      `SELECT
+         e.execution_request_id, e.source_point_request_id, e.target_user_id,
+         e.amount, e.reason, e.requested_by_admin_id,
+         a.approval_command_id, a.approved_by_admin_id
+       FROM point_grant_execution_requests e
+       JOIN point_grant_approval_commands a
+         ON a.execution_request_id = e.execution_request_id
+       WHERE e.execution_request_id = $1
+       FOR UPDATE OF e, a`,
+      [input.executionRequestId],
+    )
+    const row = execution.rows[0]
+    if (!row) throw new CoreError('승인 완료된 지급 실행 요청을 찾을 수 없습니다.')
+    if (row.requested_by_admin_id !== input.adminId) {
+      throw new CoreError('기안한 관리자만 승인된 지급을 실행할 수 있습니다.')
+    }
+    if (row.approved_by_admin_id === input.adminId) {
+      throw new CoreError('승인한 관리자는 같은 지급을 실행할 수 없습니다.')
+    }
+
+    const actors = await client.query(
+      `SELECT user_id, role, account_status
+       FROM users WHERE user_id = ANY($1::uuid[]) FOR UPDATE`,
+      [[input.adminId, row.target_user_id]],
+    )
+    const executor = actors.rows.find((user) => user.user_id === input.adminId)
+    const target = actors.rows.find((user) => user.user_id === row.target_user_id)
+    if (executor?.role !== 'ADMIN' || executor.account_status !== 'ACTIVE') {
+      throw new CoreError('활성 관리자만 승인된 지급을 실행할 수 있습니다.')
+    }
+    if (!target || target.role !== 'USER' || target.account_status !== 'ACTIVE') {
+      throw new CoreError('활성 일반 사용자에게만 포인트를 지급할 수 있습니다.')
+    }
+
+    const ledgerKey = `point-execution:${input.executionRequestId}`
+    const lockedDebts = await lockOpenPointDebtsForRepayment(client, row.target_user_id as string)
+    const inserted = await client.query(
       `INSERT INTO point_ledger (
-         user_id, entry_type, available_delta, held_delta, actor_user_id,
-         reason, idempotency_key, point_request_id
-       ) VALUES ($1, 'ADMIN_GRANT', $2, 0, $3, $4, $5, $6)
+         user_id, entry_type, available_delta, held_delta, actor_user_id, reason,
+         idempotency_key, point_request_id, grant_execution_request_id,
+         grant_approval_command_id
+       ) VALUES ($1, 'ADMIN_GRANT', $2, 0, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING ledger_id`,
       [
-        row.requester_user_id,
-        requestedAmount,
+        row.target_user_id,
+        Number(row.amount),
         input.adminId,
         row.reason,
         ledgerKey,
-        input.requestId,
+        row.source_point_request_id,
+        input.executionRequestId,
+        row.approval_command_id,
       ],
     )
-    let ledgerId = ledger.rows[0]?.ledger_id as string | undefined
+    let ledgerId = inserted.rows[0]?.ledger_id as string | undefined
     if (ledgerId) {
       await repayOpenPointDebtsFromGrant(client, {
-        userId: row.requester_user_id as string,
+        userId: row.target_user_id as string,
         adminId: input.adminId,
-        amount: requestedAmount,
+        amount: Number(row.amount),
         reason: row.reason as string,
         grantIdempotencyKey: ledgerKey,
         lockedDebts,
       })
-    }
-    if (!ledgerId) {
+    } else {
       const existing = await client.query(
         `SELECT ledger_id
          FROM point_ledger
          WHERE idempotency_key = $1
-           AND point_request_id = $2
-           AND user_id = $3
-           AND available_delta = $4
-           AND held_delta = 0
-           AND actor_user_id = $5
-           AND reason = $6`,
-        [
-          ledgerKey,
-          input.requestId,
-          row.requester_user_id,
-          requestedAmount,
-          input.adminId,
-          row.reason,
-        ],
+           AND grant_execution_request_id = $2
+           AND grant_approval_command_id = $3`,
+        [ledgerKey, input.executionRequestId, row.approval_command_id],
       )
       ledgerId = existing.rows[0]?.ledger_id as string | undefined
     }
     if (!ledgerId) {
-      throw new CoreError('지급 요청의 멱등성 정보가 기존 원장과 일치하지 않습니다.')
+      throw new CoreError('지급 실행의 멱등성 정보가 기존 원장과 일치하지 않습니다.')
     }
 
-    await client.query(
-      `UPDATE point_grant_requests
-       SET status = 'FULFILLED',
-           fulfilled_by = $2,
-           fulfilled_ledger_id = $3,
-           fulfilled_at = now()
-       WHERE request_id = $1 AND status = 'PENDING'`,
-      [input.requestId, input.adminId, ledgerId],
-    )
+    if (row.source_point_request_id) {
+      await client.query(
+        `UPDATE point_grant_requests
+         SET status = 'FULFILLED', fulfilled_by = $2, fulfilled_ledger_id = $3,
+             fulfilled_at = now()
+         WHERE request_id = $1 AND status = 'PENDING'`,
+        [row.source_point_request_id, input.adminId, ledgerId],
+      )
+    }
     return ledgerId
   })
 }
@@ -2683,61 +2957,782 @@ export async function checkInParticipant(
   })
 }
 
-export async function markParticipantNoShow(input: {
-  actorId: string
+export type TripIncidentType = 'HOST_NO_START' | 'MEMBER_NO_SHOW'
+export type TripIncidentReviewCommandType =
+  | 'START_REVIEW'
+  | 'RESPONSIBILITY_CONFIRMED'
+  | 'NOT_ESTABLISHED'
+
+function normalizeTripIncidentDescription(value: string) {
+  const description = value.trim()
+  if (description.length < 10 || description.length > 2000) {
+    throw new CoreError('사건 설명은 10~2,000자로 입력해 주세요.')
+  }
+  return description
+}
+
+function normalizeTripIncidentEvidence(value: string | null | undefined) {
+  if (!value?.trim()) return null
+  const evidence = value.trim()
+  if (evidence.length > 2000) {
+    throw new CoreError('증빙 참조는 2,000자 이하여야 합니다.')
+  }
+  return evidence
+}
+
+function normalizeTripIncidentReviewText(
+  value: string,
+  label: string,
+  maximum: number,
+) {
+  const text = value.trim()
+  if (text.length < 10 || text.length > maximum) {
+    throw new CoreError(`${label}은(는) 10~${maximum.toLocaleString()}자로 입력해 주세요.`)
+  }
+  return text
+}
+
+/**
+ * DEC-015 intake only: an incident report never changes attendance, escrow,
+ * ledger, settlement, or eligibility. Those effects require a later,
+ * separately audited resolution command.
+ */
+export async function reportTripIncident(input: {
+  reporterId: string
   tripId: string
-  participantId: string
+  reportedUserId: string
+  incidentType: TripIncidentType
+  description: string
+  evidenceRef?: string | null
   idempotencyKey: string
 }) {
-  await inTransaction(async (client) => {
-    const trip = await client.query(
-      `SELECT host_user_id, status
-       FROM trip_groups
-       WHERE trip_id = $1
+  const description = normalizeTripIncidentDescription(input.description)
+  const evidenceRef = normalizeTripIncidentEvidence(input.evidenceRef)
+
+  return inTransaction(async (client) => {
+    const replay = await client.query(
+      `SELECT incident_id, trip_id, reported_user_id, incident_type,
+              description, evidence_ref
+       FROM trip_incidents
+       WHERE reporter_user_id = $1 AND idempotency_key = $2
        FOR UPDATE`,
-      [input.tripId],
+      [input.reporterId, input.idempotencyKey],
     )
-    const tripRow = trip.rows[0]
-    if (!tripRow || tripRow.host_user_id !== input.actorId) {
-      throw new CoreError('방장만 노쇼를 처리할 수 있습니다.')
+    if (replay.rowCount) {
+      const existing = replay.rows[0]
+      const same =
+        existing.trip_id === input.tripId &&
+        existing.reported_user_id === input.reportedUserId &&
+        existing.incident_type === input.incidentType &&
+        existing.description === description &&
+        (existing.evidence_ref ?? null) === evidenceRef
+      if (!same) {
+        throw new CoreError('이미 다른 사건 접수에 사용한 요청 식별자입니다.')
+      }
+      return String(existing.incident_id)
     }
-    if (tripRow.status !== 'IN_PROGRESS') {
-      throw new CoreError('이동 시작 후에만 노쇼를 처리할 수 있습니다.')
-    }
-    const participant = await client.query(
-      `SELECT p.role, p.status, p.no_show_idempotency_key
-       FROM trip_participants p
-       JOIN trip_deposits d
-         ON d.trip_id = p.trip_id
-        AND d.user_id = p.user_id
-       WHERE p.trip_id = $1 AND p.user_id = $2
-       FOR UPDATE OF p`,
-      [input.tripId, input.participantId],
+
+    const context = await client.query(
+      `SELECT g.host_user_id, g.status AS trip_status,
+              g.departure_at <= clock_timestamp() AS departure_due,
+              reporter.role AS reporter_role, reporter.status AS reporter_status,
+              reported.role AS reported_role, reported.status AS reported_status
+       FROM trip_groups g
+       JOIN trip_participants reporter
+         ON reporter.trip_id = g.trip_id AND reporter.user_id = $2
+       JOIN trip_participants reported
+         ON reported.trip_id = g.trip_id AND reported.user_id = $3
+       JOIN trip_deposits reporter_deposit
+         ON reporter_deposit.trip_id = reporter.trip_id
+        AND reporter_deposit.user_id = reporter.user_id
+       JOIN trip_deposits reported_deposit
+         ON reported_deposit.trip_id = reported.trip_id
+        AND reported_deposit.user_id = reported.user_id
+       WHERE g.trip_id = $1
+       FOR UPDATE OF g, reporter, reported`,
+      [input.tripId, input.reporterId, input.reportedUserId],
     )
-    const row = participant.rows[0]
-    if (
-      row?.status === 'NO_SHOW' &&
-      row.no_show_idempotency_key === input.idempotencyKey
+    const row = context.rows[0]
+    if (!row || input.reporterId === input.reportedUserId) {
+      throw new CoreError('확정 참여자만 다른 참여자에 대한 사건을 접수할 수 있습니다.')
+    }
+
+    const reporterEligible = ['DEPOSITED', 'CHECKED_IN'].includes(
+      String(row.reporter_status),
+    )
+    if (!reporterEligible) {
+      throw new CoreError('예치를 마친 확정 참여자만 사건을 접수할 수 있습니다.')
+    }
+
+    if (input.incidentType === 'HOST_NO_START') {
+      if (
+        row.trip_status !== 'CONFIRMED' ||
+        row.departure_due !== true ||
+        row.reporter_role === 'HOST' ||
+        row.reported_role !== 'HOST'
+      ) {
+        throw new CoreError('출발 시각 이후, 시작하지 않은 방의 방장만 미출발로 신고할 수 있습니다.')
+      }
+    } else if (
+      row.trip_status !== 'IN_PROGRESS' ||
+      row.reported_role === 'HOST' ||
+      row.reported_status !== 'DEPOSITED'
     ) {
-      return
+      throw new CoreError('이동 중인 방의 미체크인 참여자만 노쇼로 신고할 수 있습니다.')
     }
-    if (!row || row.role === 'HOST' || row.status !== 'DEPOSITED') {
-      throw new CoreError('미체크인 확정 참여자만 노쇼 처리할 수 있습니다.')
-    }
-    await client.query(
-      `UPDATE trip_participants
-       SET status = 'NO_SHOW',
-           no_show_at = now(),
-           no_show_idempotency_key = $3,
-           no_show_marked_by = $4
-       WHERE trip_id = $1 AND user_id = $2`,
+
+    const inserted = await client.query(
+      `INSERT INTO trip_incidents (
+         trip_id, reporter_user_id, reported_user_id, incident_type,
+         description, evidence_ref, idempotency_key
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING incident_id`,
       [
         input.tripId,
-        input.participantId,
+        input.reporterId,
+        input.reportedUserId,
+        input.incidentType,
+        description,
+        evidenceRef,
         input.idempotencyKey,
-        input.actorId,
       ],
     )
+    return String(inserted.rows[0].incident_id)
+  })
+}
+
+/**
+ * DEC-015 rebuttal: the reported participant may add exactly one immutable
+ * statement. It never changes trip, participant, escrow, ledger, or settlement
+ * data. A confirmation of responsibility is blocked until this record exists.
+ */
+export async function submitTripIncidentRebuttal(input: {
+  authorId: string
+  incidentId: string
+  statement: string
+  evidenceRef?: string | null
+  idempotencyKey: string
+}) {
+  const statement = normalizeTripIncidentDescription(input.statement)
+  const evidenceRef = normalizeTripIncidentEvidence(input.evidenceRef)
+
+  return inTransaction(async (client) => {
+    const replay = await client.query(
+      `SELECT incident_id, statement, evidence_ref
+       FROM trip_incident_rebuttals
+       WHERE author_user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.authorId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      const existing = replay.rows[0]
+      if (
+        existing.incident_id !== input.incidentId ||
+        existing.statement !== statement ||
+        (existing.evidence_ref ?? null) !== evidenceRef
+      ) {
+        throw new CoreError('이미 다른 반박에 사용한 요청 식별자입니다.')
+      }
+      return String(existing.incident_id)
+    }
+
+    const incident = await client.query(
+      `SELECT incident_id, reported_user_id
+       FROM trip_incidents
+       WHERE incident_id = $1
+       FOR UPDATE`,
+      [input.incidentId],
+    )
+    const row = incident.rows[0]
+    if (!row || row.reported_user_id !== input.authorId) {
+      throw new CoreError('사건 대상자만 자신의 반박을 제출할 수 있습니다.')
+    }
+
+    const terminal = await client.query(
+      `SELECT 1
+       FROM trip_incident_review_commands
+       WHERE incident_id = $1
+         AND command_type IN ('RESPONSIBILITY_CONFIRMED', 'NOT_ESTABLISHED')
+       FOR UPDATE`,
+      [input.incidentId],
+    )
+    if (terminal.rowCount) {
+      throw new CoreError('최종 판정이 끝난 사건에는 반박을 추가할 수 없습니다.')
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO trip_incident_rebuttals (
+         incident_id, author_user_id, statement, evidence_ref, idempotency_key
+       ) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT DO NOTHING
+       RETURNING rebuttal_id`,
+      [
+        input.incidentId,
+        input.authorId,
+        statement,
+        evidenceRef,
+        input.idempotencyKey,
+      ],
+    )
+    if (inserted.rowCount) return String(inserted.rows[0].rebuttal_id)
+
+    const conflict = await client.query(
+      `SELECT incident_id, statement, evidence_ref
+       FROM trip_incident_rebuttals
+       WHERE author_user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.authorId, input.idempotencyKey],
+    )
+    const existing = conflict.rows[0]
+    if (
+      existing &&
+      existing.incident_id === input.incidentId &&
+      existing.statement === statement &&
+      (existing.evidence_ref ?? null) === evidenceRef
+    ) {
+      return String(existing.incident_id)
+    }
+    throw new CoreError('이미 이 사건에 반박이 제출되었습니다.')
+  })
+}
+
+/**
+ * DEC-015 review command: audit-only operational record. It never changes
+ * attendance, escrow, points, settlement, debt, or eligibility. A reviewed
+ * MEMBER_NO_SHOW is applied only by executeConfirmedMemberNoShow below.
+ */
+export async function decideTripIncident(input: {
+  adminId: string
+  incidentId: string
+  commandType: TripIncidentReviewCommandType
+  decisionNote: string
+  evidenceBasis: string
+  idempotencyKey: string
+}) {
+  if (![
+    'START_REVIEW',
+    'RESPONSIBILITY_CONFIRMED',
+    'NOT_ESTABLISHED',
+  ].includes(input.commandType)) {
+    throw new CoreError('사건 검토 단계가 올바르지 않습니다.')
+  }
+  const decisionNote = normalizeTripIncidentReviewText(
+    input.decisionNote,
+    '판정 사유',
+    1000,
+  )
+  const evidenceBasis = normalizeTripIncidentReviewText(
+    input.evidenceBasis,
+    '판단 근거',
+    2000,
+  )
+
+  return inTransaction(async (client) => {
+    const replay = await client.query(
+      `SELECT command_id, incident_id, command_type, decision_note, evidence_basis
+       FROM trip_incident_review_commands
+       WHERE admin_user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      const existing = replay.rows[0]
+      if (
+        existing.incident_id !== input.incidentId ||
+        existing.command_type !== input.commandType ||
+        existing.decision_note !== decisionNote ||
+        existing.evidence_basis !== evidenceBasis
+      ) {
+        throw new CoreError('이미 다른 사건 검토에 사용한 요청 식별자입니다.')
+      }
+      if (existing.command_type === 'START_REVIEW') {
+        await publishTripIncidentRebuttalWindowRecord(client, {
+          incidentId: input.incidentId,
+          reviewCommandId: String(existing.command_id),
+          adminId: input.adminId,
+          idempotencyKey: input.idempotencyKey,
+        })
+      }
+      return String(existing.incident_id)
+    }
+
+    const admin = await client.query(
+      `SELECT 1 FROM users
+       WHERE user_id = $1 AND role = 'ADMIN' AND account_status = 'ACTIVE'
+       FOR SHARE`,
+      [input.adminId],
+    )
+    if (!admin.rowCount) {
+      throw new CoreError('활성 관리자만 이동 사건을 검토할 수 있습니다.')
+    }
+
+    const incident = await client.query(
+      `SELECT i.trip_id, i.reporter_user_id, i.reported_user_id
+       FROM trip_incidents i
+       WHERE i.incident_id = $1
+       FOR UPDATE`,
+      [input.incidentId],
+    )
+    const incidentRow = incident.rows[0]
+    if (!incidentRow) throw new CoreError('이동 사건을 찾을 수 없습니다.')
+    if (
+      incidentRow.reporter_user_id === input.adminId ||
+      incidentRow.reported_user_id === input.adminId
+    ) {
+      throw new CoreError('사건 당사자는 자신의 사건을 판정할 수 없습니다.')
+    }
+    const participation = await client.query(
+      `SELECT 1 FROM trip_participants
+       WHERE trip_id = $1 AND user_id = $2
+       FOR SHARE`,
+      [incidentRow.trip_id, input.adminId],
+    )
+    if (participation.rowCount) {
+      throw new CoreError('해당 이동 참여자는 사건을 판정할 수 없습니다.')
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO trip_incident_review_commands (
+         incident_id, admin_user_id, command_type, decision_note,
+         evidence_basis, idempotency_key
+       ) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT DO NOTHING
+       RETURNING command_id`,
+      [
+        input.incidentId,
+        input.adminId,
+        input.commandType,
+        decisionNote,
+        evidenceBasis,
+        input.idempotencyKey,
+      ],
+    )
+    if (inserted.rowCount) {
+      const commandId = String(inserted.rows[0].command_id)
+      if (input.commandType === 'START_REVIEW') {
+        await publishTripIncidentRebuttalWindowRecord(client, {
+          incidentId: input.incidentId,
+          reviewCommandId: commandId,
+          adminId: input.adminId,
+          idempotencyKey: input.idempotencyKey,
+        })
+      }
+      return commandId
+    }
+
+    const conflict = await client.query(
+      `SELECT command_id, incident_id, command_type, decision_note, evidence_basis
+       FROM trip_incident_review_commands
+       WHERE admin_user_id = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    const existing = conflict.rows[0]
+    if (
+      existing &&
+      existing.incident_id === input.incidentId &&
+      existing.command_type === input.commandType &&
+      existing.decision_note === decisionNote &&
+      existing.evidence_basis === evidenceBasis
+    ) {
+      if (existing.command_type === 'START_REVIEW') {
+        await publishTripIncidentRebuttalWindowRecord(client, {
+          incidentId: input.incidentId,
+          reviewCommandId: String(existing.command_id),
+          adminId: input.adminId,
+          idempotencyKey: input.idempotencyKey,
+        })
+      }
+      return String(existing.incident_id)
+    }
+    throw new CoreError('사건 검토 상태가 다른 요청으로 이미 변경되었습니다.')
+  })
+}
+
+async function publishTripIncidentRebuttalWindowRecord(
+  client: PoolClient,
+  input: {
+    incidentId: string
+    reviewCommandId: string
+    adminId: string
+    idempotencyKey: string
+  },
+) {
+  const existing = await client.query(
+    `SELECT notification_id, review_command_id, exposed_by
+     FROM trip_incident_review_notifications
+     WHERE incident_id = $1
+     FOR UPDATE`,
+    [input.incidentId],
+  )
+  if (existing.rowCount) {
+    const notification = existing.rows[0]
+    if (notification.review_command_id !== input.reviewCommandId) {
+      throw new CoreError('다른 검토 기록의 반박 기회가 이미 게시되어 있습니다.')
+    }
+    return String(notification.notification_id)
+  }
+
+  const inserted = await client.query(
+    `INSERT INTO trip_incident_review_notifications (
+       incident_id, review_command_id, recipient_user_id, exposed_by,
+       idempotency_key, rebuttal_deadline_at
+     )
+     SELECT i.incident_id, $2, i.reported_user_id, $3, $4, clock_timestamp()
+     FROM trip_incidents i
+     WHERE i.incident_id = $1
+     RETURNING notification_id`,
+    [
+      input.incidentId,
+      input.reviewCommandId,
+      input.adminId,
+      input.idempotencyKey,
+    ],
+  )
+  if (!inserted.rowCount) {
+    throw new CoreError('반박 기회를 게시할 사건을 찾을 수 없습니다.')
+  }
+  return String(inserted.rows[0].notification_id)
+}
+
+/** Publishes the first real in-app rebuttal opportunity for a legacy review. */
+export async function publishTripIncidentRebuttalWindow(input: {
+  adminId: string
+  incidentId: string
+  idempotencyKey: string
+}) {
+  if (!isPointRequestUuid(input.incidentId) || !isPointRequestUuid(input.idempotencyKey)) {
+    throw new CoreError('사건과 요청 식별자가 올바르지 않습니다.')
+  }
+
+  return inTransaction(async (client) => {
+    const review = await client.query(
+      `SELECT c.command_id, c.admin_user_id, admin.role, admin.account_status
+       FROM trip_incident_review_commands c
+       JOIN users admin ON admin.user_id = $2
+       WHERE c.incident_id = $1 AND c.command_type = 'START_REVIEW'
+       FOR UPDATE OF c`,
+      [input.incidentId, input.adminId],
+    )
+    const row = review.rows[0]
+    if (!row) {
+      throw new CoreError('검토 시작 기록이 있는 사건만 반박 기회를 게시할 수 있습니다.')
+    }
+    if (row.role !== 'ADMIN' || row.account_status !== 'ACTIVE') {
+      throw new CoreError('활성 관리자만 반박 기회를 게시할 수 있습니다.')
+    }
+    return publishTripIncidentRebuttalWindowRecord(client, {
+      incidentId: input.incidentId,
+      reviewCommandId: String(row.command_id),
+      adminId: input.adminId,
+      idempotencyKey: input.idempotencyKey,
+    })
+  })
+}
+
+/**
+ * Executes an already-reviewed MEMBER_NO_SHOW fact. This deliberately changes
+ * only the participant state; the fixed escrow cohort, ledger, balances, and
+ * settlement amounts are left untouched for the normal fare flow.
+ */
+export async function executeConfirmedMemberNoShow(input: {
+  adminId: string
+  incidentId: string
+  idempotencyKey: string
+}) {
+  if (!isPointRequestUuid(input.incidentId) || !isPointRequestUuid(input.idempotencyKey)) {
+    throw new CoreError('사건과 요청 식별자가 올바르지 않습니다.')
+  }
+
+  return inTransaction(async (client) => {
+    const replay = await client.query(
+      `SELECT execution_id, incident_id
+       FROM trip_incident_no_show_executions
+       WHERE executed_by = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      const existing = replay.rows[0]
+      if (existing.incident_id !== input.incidentId) {
+        throw new CoreError('이미 다른 노쇼 확정에 사용한 요청 식별자입니다.')
+      }
+      return String(existing.execution_id)
+    }
+
+    const context = await client.query(
+      `SELECT
+         i.trip_id,
+         i.reporter_user_id,
+         i.reported_user_id,
+         i.incident_type,
+         c.command_id AS review_command_id,
+         c.admin_user_id AS review_admin_id,
+         p.status AS participant_status,
+         p.role AS participant_role,
+         g.status AS trip_status,
+         admin.role AS admin_role,
+         admin.account_status AS admin_status
+       FROM trip_incidents i
+       JOIN trip_incident_review_commands c
+         ON c.incident_id = i.incident_id
+        AND c.command_type = 'RESPONSIBILITY_CONFIRMED'
+       JOIN trip_groups g ON g.trip_id = i.trip_id
+       JOIN trip_participants p
+         ON p.trip_id = i.trip_id AND p.user_id = i.reported_user_id
+       JOIN users admin ON admin.user_id = $2
+       WHERE i.incident_id = $1
+       FOR UPDATE OF i, c, g, p`,
+      [input.incidentId, input.adminId],
+    )
+    const row = context.rows[0]
+    if (!row) {
+      throw new CoreError('귀책 사실이 확정된 노쇼 사건만 처리할 수 있습니다.')
+    }
+    if (row.admin_role !== 'ADMIN' || row.admin_status !== 'ACTIVE') {
+      throw new CoreError('활성 관리자만 노쇼 사실을 확정할 수 있습니다.')
+    }
+    if (row.review_admin_id !== input.adminId) {
+      throw new CoreError('사건 판정을 기록한 관리자만 노쇼 사실을 확정할 수 있습니다.')
+    }
+    if (row.incident_type !== 'MEMBER_NO_SHOW') {
+      throw new CoreError('참여자 노쇼 사건만 처리할 수 있습니다.')
+    }
+    if (
+      row.trip_status !== 'IN_PROGRESS' ||
+      row.participant_role !== 'MEMBER' ||
+      row.participant_status !== 'DEPOSITED'
+    ) {
+      throw new CoreError('이동 중인 미체크인 참여자만 노쇼로 확정할 수 있습니다.')
+    }
+
+    const adminParticipation = await client.query(
+      `SELECT 1 FROM trip_participants
+       WHERE trip_id = $1 AND user_id = $2
+       FOR SHARE`,
+      [row.trip_id, input.adminId],
+    )
+    if (
+      row.reporter_user_id === input.adminId ||
+      row.reported_user_id === input.adminId ||
+      adminParticipation.rowCount
+    ) {
+      throw new CoreError('사건 당사자 또는 해당 이동 참여자는 노쇼 사실을 확정할 수 없습니다.')
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO trip_incident_no_show_executions (
+         incident_id, review_command_id, trip_id, reported_user_id,
+         executed_by, idempotency_key
+       ) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING execution_id, executed_at`,
+      [
+        input.incidentId,
+        row.review_command_id,
+        row.trip_id,
+        row.reported_user_id,
+        input.adminId,
+        input.idempotencyKey,
+      ],
+    )
+    const execution = inserted.rows[0]
+    if (!execution) throw new CoreError('노쇼 확정 기록을 만들지 못했습니다.')
+
+    const transitioned = await client.query(
+      `UPDATE trip_participants
+       SET status = 'NO_SHOW',
+           no_show_at = $4,
+           no_show_marked_by = $3,
+           no_show_idempotency_key = $5,
+           no_show_execution_id = $6
+       WHERE trip_id = $1 AND user_id = $2 AND status = 'DEPOSITED'
+       RETURNING participant_id`,
+      [
+        row.trip_id,
+        row.reported_user_id,
+        input.adminId,
+        execution.executed_at,
+        input.idempotencyKey,
+        execution.execution_id,
+      ],
+    )
+    if (!transitioned.rowCount) {
+      throw new CoreError('노쇼 확정 대상의 참여 상태가 변경되었습니다. 새로고침 후 다시 시도해 주세요.')
+    }
+    return String(execution.execution_id)
+  })
+}
+
+/**
+ * Executes a reviewed HOST_NO_START outcome. This is intentionally a narrow
+ * compensation action: member escrow is returned and the trip is cancelled;
+ * host escrow and any host penalty remain untouched pending a separate policy.
+ */
+export async function executeConfirmedHostNoStartRefund(input: {
+  adminId: string
+  incidentId: string
+  idempotencyKey: string
+}) {
+  if (!isPointRequestUuid(input.incidentId) || !isPointRequestUuid(input.idempotencyKey)) {
+    throw new CoreError('사건과 요청 식별자가 올바르지 않습니다.')
+  }
+
+  return inTransaction(async (client) => {
+    const replay = await client.query(
+      `SELECT execution_id, incident_id
+       FROM trip_incident_no_start_refund_executions
+       WHERE executed_by = $1 AND idempotency_key = $2
+       FOR UPDATE`,
+      [input.adminId, input.idempotencyKey],
+    )
+    if (replay.rowCount) {
+      const existing = replay.rows[0]
+      if (existing.incident_id !== input.incidentId) {
+        throw new CoreError('다른 사건에 사용한 요청 식별자입니다.')
+      }
+      return String(existing.execution_id)
+    }
+
+    const context = await client.query(
+      `SELECT
+         i.trip_id,
+         i.reporter_user_id,
+         i.reported_user_id,
+         i.incident_type,
+         c.command_id AS review_command_id,
+         c.admin_user_id AS review_admin_id,
+         g.host_user_id,
+         g.status AS trip_status,
+         g.departure_at <= clock_timestamp() AS departure_due,
+         admin.role AS admin_role,
+         admin.account_status AS admin_status
+       FROM trip_incidents i
+       JOIN trip_incident_review_commands c
+         ON c.incident_id = i.incident_id
+        AND c.command_type = 'RESPONSIBILITY_CONFIRMED'
+       JOIN trip_groups g ON g.trip_id = i.trip_id
+       JOIN users admin ON admin.user_id = $2
+       WHERE i.incident_id = $1
+       FOR UPDATE OF i, c, g`,
+      [input.incidentId, input.adminId],
+    )
+    const row = context.rows[0]
+    if (!row) {
+      throw new CoreError('귀책이 확정된 사건만 처리할 수 있습니다.')
+    }
+    if (row.admin_role !== 'ADMIN' || row.admin_status !== 'ACTIVE') {
+      throw new CoreError('활성 관리자만 미개시 환불을 실행할 수 있습니다.')
+    }
+    if (row.review_admin_id !== input.adminId) {
+      throw new CoreError('사건 책임을 기록한 관리자만 미개시 환불을 실행할 수 있습니다.')
+    }
+    if (row.incident_type !== 'HOST_NO_START' || row.reported_user_id !== row.host_user_id) {
+      throw new CoreError('모집자 미개시 사건만 처리할 수 있습니다.')
+    }
+    if (row.trip_status !== 'CONFIRMED' || !row.departure_due) {
+      throw new CoreError('출발 시각이 지난 확정 모집만 미개시 환불로 취소할 수 있습니다.')
+    }
+
+    const adminParticipation = await client.query(
+      `SELECT 1 FROM trip_participants
+       WHERE trip_id = $1 AND user_id = $2
+       FOR SHARE`,
+      [row.trip_id, input.adminId],
+    )
+    if (
+      row.reporter_user_id === input.adminId ||
+      row.reported_user_id === input.adminId ||
+      adminParticipation.rowCount
+    ) {
+      throw new CoreError('사건 당사자 또는 해당 모집 참여자는 미개시 환불을 실행할 수 없습니다.')
+    }
+
+    const deposits = await client.query(
+      `SELECT p.user_id, p.role, p.status, d.amount
+       FROM trip_participants p
+       JOIN trip_deposits d
+         ON d.trip_id = p.trip_id AND d.user_id = p.user_id
+       WHERE p.trip_id = $1
+       ORDER BY p.role DESC, p.user_id
+       FOR UPDATE OF p, d`,
+      [row.trip_id],
+    )
+    const members = deposits.rows.filter(
+      (participant) => participant.role === 'MEMBER' && participant.status === 'DEPOSITED',
+    )
+    const hostDeposits = deposits.rows.filter(
+      (participant) => participant.role === 'HOST' && participant.status === 'DEPOSITED',
+    )
+    const depositCount = deposits.rowCount ?? 0
+    if (
+      depositCount < 2 ||
+      depositCount > 4 ||
+      members.length !== depositCount - 1 ||
+      hostDeposits.length !== 1
+    ) {
+      throw new CoreError('예치 확정 인원이 올바르지 않아 미개시 환불을 실행할 수 없습니다.')
+    }
+
+    const settlement = await client.query(
+      `SELECT 1 FROM trip_settlements WHERE trip_id = $1 FOR SHARE`,
+      [row.trip_id],
+    )
+    if (settlement.rowCount) {
+      throw new CoreError('정산이 시작된 모집은 미개시 환불로 처리할 수 없습니다.')
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO trip_incident_no_start_refund_executions (
+         incident_id, review_command_id, trip_id, executed_by, idempotency_key
+       ) VALUES ($1,$2,$3,$4,$5)
+       RETURNING execution_id, executed_at`,
+      [
+        input.incidentId,
+        row.review_command_id,
+        row.trip_id,
+        input.adminId,
+        input.idempotencyKey,
+      ],
+    )
+    const execution = inserted.rows[0]
+    if (!execution) throw new CoreError('미개시 환불 실행 기록을 만들지 못했습니다.')
+
+    for (const participant of members) {
+      const memberId = String(participant.user_id)
+      const amount = Number(participant.amount)
+      await client.query(
+        `INSERT INTO point_ledger (
+           user_id, entry_type, available_delta, held_delta, trip_id,
+           actor_user_id, no_start_refund_execution_id, reason, idempotency_key
+         ) VALUES ($1, 'REFUND', $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          memberId,
+          amount,
+          -amount,
+          row.trip_id,
+          input.adminId,
+          execution.execution_id,
+          '모집자 미개시: 비귀책 참여자 예치금 전액 반환',
+          `host-no-start-refund:${execution.execution_id}:${memberId}`,
+        ],
+      )
+    }
+
+    const cancelled = await client.query(
+      `UPDATE trip_groups
+       SET status = 'CANCELLED',
+           closed_at = $2,
+           closure_type = 'CANCELLED',
+           cancelled_at = $2,
+           cancellation_idempotency_key = $3
+       WHERE trip_id = $1 AND status = 'CONFIRMED'
+       RETURNING trip_id`,
+      [row.trip_id, execution.executed_at, input.idempotencyKey],
+    )
+    if (!cancelled.rowCount) {
+      throw new CoreError('모집 상태가 변경되어 미개시 환불을 실행할 수 없습니다.')
+    }
+    return String(execution.execution_id)
   })
 }
 

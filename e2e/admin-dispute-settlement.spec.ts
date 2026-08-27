@@ -1,6 +1,10 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 import { Pool } from '@neondatabase/serverless'
+import {
+  seedApprovedDirectGrant,
+  seedExecutedMemberNoShow,
+} from './support/operational-fixtures'
 
 type Fixture = {
   runId: string
@@ -23,6 +27,7 @@ async function seedPendingDispute(): Promise<Fixture> {
   const runId = `e2e-${randomUUID()}`
   const tripId = randomUUID()
   const adminId = randomUUID()
+  const approverAdminId = randomUUID()
   const hostId = randomUUID()
   const memberId = randomUUID()
   const noShowId = randomUUID()
@@ -46,16 +51,30 @@ async function seedPendingDispute(): Promise<Fixture> {
       )
     }
     await client.query(
+      `INSERT INTO users (user_id, signup_attempt_id, student_id, name, gender, school_email, role, account_status)
+       VALUES ($1, $2, $3, $4, 'female', $5, 'ADMIN', 'ACTIVE')`,
+      [
+        approverAdminId,
+        randomUUID(),
+        `8${Date.now().toString().slice(-7)}9`,
+        `${runId}-grant-approver`,
+        `${runId}-grant-approver@jbnu.ac.kr`,
+      ],
+    )
+    await client.query(
       `INSERT INTO auth_sessions (user_id, token_hash, expires_at)
        VALUES ($1, $2, now() + interval '1 hour')`,
       [adminId, createHash('sha256').update(token).digest('hex')],
     )
     for (const userId of ids) {
-      await client.query(
-        `INSERT INTO point_ledger (user_id, entry_type, available_delta, held_delta, trip_id, actor_user_id, reason, idempotency_key)
-         VALUES ($1, 'ADMIN_GRANT', 6000, 0, NULL, $2, 'E2E fixture grant', $3)`,
-        [userId, adminId, `${runId}:grant:${userId}`],
-      )
+      await seedApprovedDirectGrant({
+        client,
+        targetUserId: userId,
+        amount: 6000,
+        requestedByAdminId: adminId,
+        approvedByAdminId: approverAdminId,
+        reason: 'E2E fixture grant',
+      })
     }
     await client.query(
       `INSERT INTO trip_groups (
@@ -129,11 +148,13 @@ async function seedPendingDispute(): Promise<Fixture> {
        WHERE trip_id = $1 AND user_id = $2`,
       [tripId, memberId, randomUUID()],
     )
-    await client.query(
-      `UPDATE trip_participants SET status = 'NO_SHOW', no_show_at = now(), no_show_marked_by = $3, no_show_idempotency_key = $4
-       WHERE trip_id = $1 AND user_id = $2`,
-      [tripId, noShowId, hostId, randomUUID()],
-    )
+    await seedExecutedMemberNoShow({
+      client,
+      tripId,
+      reporterUserId: hostId,
+      reportedUserId: noShowId,
+      adminId,
+    })
     await client.query(
       `INSERT INTO trip_settlements (
          trip_id, actual_fare, participant_count, final_share, submitted_by,

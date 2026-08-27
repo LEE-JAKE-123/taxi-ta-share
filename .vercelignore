@@ -4,4 +4,6 @@
 .neon
 test-results/
 playwright-report/
+.next-e2e/
+.pnpm-store/
 *.tsbuildinfo

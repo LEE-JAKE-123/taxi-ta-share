@@ -37,12 +37,8 @@ SELECT
     WHERE schemaname = 'public'
       AND indexname = 'trip_incident_rebuttals_one_per_incident'
   ) AS one_rebuttal_guard_exists,
-  position(
-    $$has_valid_notification IS DISTINCT FROM true$$
-    IN pg_get_functiondef('validate_trip_incident_review_command()'::regprocedure)
-  ) > 0
-  AND position(
-    $$NOT has_rebuttal
-          AND clock_timestamp() < rebuttal_deadline_at$$
-    IN pg_get_functiondef('validate_trip_incident_review_command()'::regprocedure)
-  ) > 0 AS confirmed_requires_notice_and_response_or_deadline_guard_exists;
+  pg_get_functiondef('validate_trip_incident_review_command()'::regprocedure)
+    LIKE '%has_valid_notification IS DISTINCT FROM true%'
+  AND pg_get_functiondef('validate_trip_incident_review_command()'::regprocedure)
+    LIKE '%NOT has_rebuttal%clock_timestamp() < rebuttal_deadline_at%'
+    AS confirmed_requires_notice_and_response_or_deadline_guard_exists;

@@ -183,6 +183,43 @@ export default async function PointsPage({
           </section>
         ) : null}
 
+        {data.escrowShortfalls.length ? (
+          <section aria-labelledby="escrow-shortfall-heading">
+            <h2 id="escrow-shortfall-heading" className="mb-3 text-sm font-bold">
+              예치 부족분
+            </h2>
+            <Card className="gap-0 p-0">
+              {data.escrowShortfalls.map((shortfall, index) => (
+                <div
+                  key={shortfall.shortfallId}
+                  className={cn(
+                    'flex items-center justify-between gap-3 px-4 py-3.5',
+                    index !== data.escrowShortfalls.length - 1 &&
+                      'border-b border-border',
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">
+                      {shortfall.status === 'OPEN' ? '정산 상계 대기' : '정산 상계 완료'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      예상 예치 {formatPoints(shortfall.expectedDepositPoints)} · {formatDate(shortfall.createdAt)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold">
+                      {formatPoints(shortfall.outstandingPoints)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {shortfall.status === 'OPEN' ? '정산 대기' : '상계됨'}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </Card>
+          </section>
+        ) : null}
+
         <section aria-labelledby="ledger-heading">
           <h2 id="ledger-heading" className="mb-3 text-sm font-bold">
             포인트 원장

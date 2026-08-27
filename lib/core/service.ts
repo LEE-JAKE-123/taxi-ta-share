@@ -541,7 +541,7 @@ export async function getMyPageBalanceSummary(userId: string) {
 export async function getPointDashboard(userId: string) {
   await ensureDatabaseIdentity()
   const sql = getDatabase()
-  const [balances, ledger, requests] = await Promise.all([
+  const [balances, ledger, requests, escrowShortfalls] = await Promise.all([
     sql`
       SELECT
         available_points AS "availablePoints",
@@ -576,6 +576,20 @@ export async function getPointDashboard(userId: string) {
       ORDER BY requested_at DESC, request_id DESC
       LIMIT 20
     `,
+    sql`
+      SELECT
+        shortfall_id AS "shortfallId",
+        trip_id AS "tripId",
+        expected_deposit_points AS "expectedDepositPoints",
+        outstanding_points AS "outstandingPoints",
+        status,
+        created_at AS "createdAt",
+        settled_at AS "settledAt"
+      FROM trip_escrow_shortfalls
+      WHERE user_id = ${userId}
+      ORDER BY created_at DESC, shortfall_id DESC
+      LIMIT 20
+    `,
   ])
 
   const balance = balances[0] as
@@ -607,6 +621,15 @@ export async function getPointDashboard(userId: string) {
       status: 'PENDING' | 'FULFILLED'
       requestedAt: string
       fulfilledAt: string | null
+    }>,
+    escrowShortfalls: escrowShortfalls as unknown as Array<{
+      shortfallId: string
+      tripId: string
+      expectedDepositPoints: number
+      outstandingPoints: number
+      status: 'OPEN' | 'SETTLED' | 'WAIVED'
+      createdAt: string
+      settledAt: string | null
     }>,
   }
 }
@@ -1384,6 +1407,36 @@ export async function provisionallySettleTripV2(input: {
             commandId],
         )
       }
+    }
+    const escrowShortfalls = await client.query(
+      `SELECT shortfall_id, user_id, outstanding_points
+       FROM trip_escrow_shortfalls
+       WHERE trip_id = $1
+         AND user_id = ANY($2::uuid[])
+         AND status = 'OPEN'
+       ORDER BY user_id
+       FOR UPDATE`,
+      [input.tripId, userIds],
+    )
+    for (const shortfall of escrowShortfalls.rows) {
+      const outstandingPoints = Number(shortfall.outstanding_points)
+      if (!Number.isSafeInteger(outstandingPoints) || outstandingPoints < 1) {
+        throw new CoreError('예치 부족 외상 잔액이 올바르지 않습니다.')
+      }
+      await client.query(
+        `INSERT INTO trip_escrow_shortfall_events (
+           shortfall_id, user_id, event_type, points_delta,
+           system_deadline_command_id, reason, idempotency_key
+         ) VALUES ($1, $2, 'RECONCILE', $3, $4,
+           '실제 요금 잠정 정산으로 예치 부족 외상을 상계', $5)`,
+        [
+          shortfall.shortfall_id,
+          shortfall.user_id,
+          -outstandingPoints,
+          commandId,
+          `provisional:${input.tripId}:revision:${settlement.fare_revision}:escrow-shortfall-reconcile:${shortfall.user_id}`,
+        ],
+      )
     }
     return 'SETTLED' as const
   })
@@ -2223,24 +2276,68 @@ export async function confirmTripAndDeposit(
     )
     if (
       balances.rowCount !== userIds.length ||
-      balances.rows.some((balance) => Number(balance.available_points) < deposit)
+      balances.rows.some((balance) =>
+        !Number.isSafeInteger(Number(balance.available_points)) ||
+        Number(balance.available_points) < 0,
+      )
     ) {
       throw new CoreError(`모든 확정 참여자에게 ${deposit.toLocaleString()}P 이상이 필요합니다.`)
     }
 
+    const availableByUser = new Map(
+      balances.rows.map((balance) => [
+        String(balance.user_id),
+        Number(balance.available_points),
+      ]),
+    )
+
     for (const participantId of userIds) {
+      const availablePoints = availableByUser.get(participantId)
+      if (availablePoints === undefined) {
+        throw new CoreError('확정 참여자의 포인트 계정을 찾을 수 없습니다.')
+      }
+      const heldPoints = Math.min(availablePoints, deposit)
+      const shortfallPoints = deposit - heldPoints
       await client.query(
         `INSERT INTO trip_deposits (trip_id, user_id, amount)
          VALUES ($1, $2, $3)`,
-        [tripId, participantId, deposit],
+        [tripId, participantId, heldPoints],
       )
-      await client.query(
+      if (heldPoints > 0) {
+        await client.query(
         `INSERT INTO point_ledger (
            user_id, entry_type, available_delta, held_delta, trip_id,
            actor_user_id, reason, idempotency_key
          ) VALUES ($1, 'DEPOSIT', $2, $3, $4, $5, '예상 요금 예치', $6)`,
-        [participantId, -deposit, deposit, tripId, actorId, `trip:${tripId}:deposit:${participantId}`],
-      )
+        [participantId, -heldPoints, heldPoints, tripId, actorId, `trip:${tripId}:deposit:${participantId}`],
+        )
+      }
+      if (shortfallPoints > 0) {
+        const shortfall = await client.query(
+          `INSERT INTO trip_escrow_shortfalls (
+             trip_id, user_id, expected_deposit_points
+           ) VALUES ($1, $2, $3)
+           RETURNING shortfall_id`,
+          [tripId, participantId, deposit],
+        )
+        const shortfallId = shortfall.rows[0]?.shortfall_id as string | undefined
+        if (!shortfallId) {
+          throw new CoreError('예치 부족 외상 기록을 만들 수 없습니다.')
+        }
+        await client.query(
+          `INSERT INTO trip_escrow_shortfall_events (
+             shortfall_id, user_id, event_type, points_delta, actor_user_id,
+             reason, idempotency_key
+           ) VALUES ($1, $2, 'INCUR', $3, $4, '예상 요금 예치 부족분', $5)`,
+          [
+            shortfallId,
+            participantId,
+            shortfallPoints,
+            actorId,
+            `trip:${tripId}:escrow-shortfall:${participantId}`,
+          ],
+        )
+      }
     }
     await client.query(
       `UPDATE trip_participants SET status = 'DEPOSITED', deposited_at = now()
@@ -3700,8 +3797,9 @@ export async function executeConfirmedHostNoStartRefund(input: {
     for (const participant of members) {
       const memberId = String(participant.user_id)
       const amount = Number(participant.amount)
-      await client.query(
-        `INSERT INTO point_ledger (
+      if (amount > 0) {
+        await client.query(
+          `INSERT INTO point_ledger (
            user_id, entry_type, available_delta, held_delta, trip_id,
            actor_user_id, no_start_refund_execution_id, reason, idempotency_key
          ) VALUES ($1, 'REFUND', $2, $3, $4, $5, $6, $7, $8)`,
@@ -3714,6 +3812,40 @@ export async function executeConfirmedHostNoStartRefund(input: {
           execution.execution_id,
           '모집자 미개시: 비귀책 참여자 예치금 전액 반환',
           `host-no-start-refund:${execution.execution_id}:${memberId}`,
+        ],
+        )
+      }
+    }
+
+    const escrowShortfalls = await client.query(
+      `SELECT s.shortfall_id, s.user_id, s.outstanding_points
+       FROM trip_escrow_shortfalls s
+       JOIN trip_participants p
+         ON p.trip_id = s.trip_id AND p.user_id = s.user_id
+       WHERE s.trip_id = $1
+         AND s.status = 'OPEN'
+         AND p.role = 'MEMBER'
+       ORDER BY s.user_id
+       FOR UPDATE OF s, p`,
+      [row.trip_id],
+    )
+    for (const shortfall of escrowShortfalls.rows) {
+      const outstandingPoints = Number(shortfall.outstanding_points)
+      if (!Number.isSafeInteger(outstandingPoints) || outstandingPoints < 1) {
+        throw new CoreError('예치 부족 외상 잔액이 올바르지 않습니다.')
+      }
+      await client.query(
+        `INSERT INTO trip_escrow_shortfall_events (
+           shortfall_id, user_id, event_type, points_delta,
+           no_start_refund_execution_id, reason, idempotency_key
+         ) VALUES ($1, $2, 'WAIVE', $3, $4,
+           '모집자 미개시로 비귀책 참여자 예치 부족 외상 면제', $5)`,
+        [
+          shortfall.shortfall_id,
+          shortfall.user_id,
+          -outstandingPoints,
+          execution.execution_id,
+          `host-no-start-refund:${execution.execution_id}:escrow-shortfall-waive:${shortfall.user_id}`,
         ],
       )
     }

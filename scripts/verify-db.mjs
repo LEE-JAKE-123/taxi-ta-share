@@ -133,6 +133,21 @@ const tripIncidentRebuttalWindowMigrationChecksum = createHash('sha256')
 const adminPointGrantDualControlMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0036_admin_point_grant_dual_control.sql'))
   .digest('hex')
+const predepartureEscrowShortfallMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0037_predeparture_escrow_shortfall.sql'))
+  .digest('hex')
+const escrowShortfallFollowupGuardsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0038_escrow_shortfall_followup_guards.sql'))
+  .digest('hex')
+const escrowShortfallLegacyEscrowCompatMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0039_escrow_shortfall_legacy_escrow_compat.sql'))
+  .digest('hex')
+const incidentReviewerVariableDisambiguationMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0040_incident_reviewer_variable_disambiguation.sql'))
+  .digest('hex')
+const escrowShortfallExactDepositGuardMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0041_escrow_shortfall_exact_deposit_guard.sql'))
+  .digest('hex')
 const incidentAndPointSafetyVerificationFiles = [
   'db/verify/0030_predeparture_escrow_guard.sql',
   'db/verify/0031_trip_incident_intake.sql',
@@ -141,6 +156,11 @@ const incidentAndPointSafetyVerificationFiles = [
   'db/verify/0034_host_no_start_refund_execution.sql',
   'db/verify/0035_trip_incident_rebuttal_window.sql',
   'db/verify/0036_admin_point_grant_dual_control.sql',
+  'db/verify/0037_predeparture_escrow_shortfall.sql',
+  'db/verify/0038_escrow_shortfall_followup_guards.sql',
+  'db/verify/0039_escrow_shortfall_legacy_escrow_compat.sql',
+  'db/verify/0040_incident_reviewer_variable_disambiguation.sql',
+  'db/verify/0041_escrow_shortfall_exact_deposit_guard.sql',
 ]
 
 if (
@@ -1215,6 +1235,43 @@ try {
 
   if (failedChecks.length) {
     throw new Error(`Database verification failed: ${failedChecks.join(', ')}.`)
+  }
+
+  const escrowShortfallMigrations = await client.query(
+    `SELECT
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0037_predeparture_escrow_shortfall'
+          AND checksum = $2 AND environment = $1) AS shortfall_migration_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0038_escrow_shortfall_followup_guards'
+          AND checksum = $3 AND environment = $1) AS shortfall_followup_migration_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0039_escrow_shortfall_legacy_escrow_compat'
+          AND checksum = $4 AND environment = $1) AS shortfall_legacy_compat_migration_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0040_incident_reviewer_variable_disambiguation'
+          AND checksum = $5 AND environment = $1) AS incident_reviewer_variable_disambiguation_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0041_escrow_shortfall_exact_deposit_guard'
+          AND checksum = $6 AND environment = $1) AS escrow_shortfall_exact_deposit_guard_valid`,
+    [
+      expectedEnvironment,
+      predepartureEscrowShortfallMigrationChecksum,
+      escrowShortfallFollowupGuardsMigrationChecksum,
+      escrowShortfallLegacyEscrowCompatMigrationChecksum,
+      incidentReviewerVariableDisambiguationMigrationChecksum,
+      escrowShortfallExactDepositGuardMigrationChecksum,
+    ],
+  )
+  const failedEscrowShortfallMigrationChecks = Object.entries(
+    escrowShortfallMigrations.rows[0] ?? {},
+  )
+    .filter(([, passed]) => passed !== true)
+    .map(([name]) => name)
+  if (failedEscrowShortfallMigrationChecks.length) {
+    throw new Error(
+      `Database verification failed: ${failedEscrowShortfallMigrationChecks.join(', ')}.`,
+    )
   }
 
   for (const verificationFile of incidentAndPointSafetyVerificationFiles) {

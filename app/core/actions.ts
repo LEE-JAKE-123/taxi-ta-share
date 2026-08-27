@@ -310,7 +310,7 @@ export async function confirmTripAndDepositFromRoomAction(formData: FormData) {
   await executeRoom(
     tripId,
     () => confirmTripAndDeposit(user.userId, tripId, idempotencyKey),
-    '모집을 확정하고 전원 포인트 예치를 완료했습니다. 이제 출발할 수 있습니다.',
+    '모집을 확정했습니다. 부족한 예치금은 예치 부족분으로 기록되며, 이제 출발할 수 있습니다.',
   )
 }
 

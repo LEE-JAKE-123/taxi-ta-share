@@ -369,7 +369,7 @@ export default async function RoomDetailPage({
               확정된 참여자 전원의 예상 요금 포인트를 예치하면 모집이 확정되고 출발할 수 있습니다.
             </p>
             <p className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
-              한 명이라도 잔액이 부족하거나 요금을 다시 계산할 수 없으면 예치와 상태 변경은 모두 취소됩니다.
+              잔액이 부족한 참여자는 보유 포인트만 예치하고 부족분을 기록합니다. 현재 방은 계속 진행되지만, 예치 부족분이 남아 있으면 이후 일반 이용이 제한됩니다.
             </p>
           </Card>
         ) : null}

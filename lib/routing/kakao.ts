@@ -1,5 +1,5 @@
 import { RoutingError } from './errors'
-import { createRouteEvidence } from './evidence'
+import { createRouteEvidence, normalizeRouteGeometry } from './evidence'
 import { fetchJson } from './http'
 import type {
   Coordinates,
@@ -23,6 +23,9 @@ type KakaoDirectionsResponse = {
       duration?: unknown
       fare?: { taxi?: unknown }
     }
+    sections?: Array<{
+      roads?: Array<{ vertexes?: unknown }>
+    }>
   }>
 }
 
@@ -50,6 +53,22 @@ function positiveInteger(value: unknown, field: string) {
     )
   }
   return value
+}
+
+function routePoints(route: NonNullable<KakaoDirectionsResponse['routes']>[number]) {
+  const points: Coordinates[] = []
+  for (const section of route.sections ?? []) {
+    for (const road of section.roads ?? []) {
+      if (!Array.isArray(road.vertexes)) continue
+      for (let index = 0; index + 1 < road.vertexes.length; index += 2) {
+        const longitude = road.vertexes[index]
+        const latitude = road.vertexes[index + 1]
+        if (typeof latitude !== 'number' || typeof longitude !== 'number') continue
+        points.push({ latitude, longitude })
+      }
+    }
+  }
+  return normalizeRouteGeometry(points)
 }
 
 export const kakaoRoutingAdapter: RoutingAdapter = {
@@ -126,7 +145,6 @@ export const kakaoRoutingAdapter: RoutingAdapter = {
       `${destination.longitude},${destination.latitude}`,
     )
     url.searchParams.set('priority', 'RECOMMEND')
-    url.searchParams.set('summary', 'true')
 
     const body = (await fetchJson(url, {
       headers: { Authorization: `KakaoAK ${key()}` },
@@ -160,6 +178,7 @@ export const kakaoRoutingAdapter: RoutingAdapter = {
       distanceMeters,
       durationSeconds,
       estimatedFareWon,
+      geometry: routePoints(route),
     })
   },
 }

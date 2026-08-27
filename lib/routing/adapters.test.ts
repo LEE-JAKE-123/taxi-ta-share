@@ -44,6 +44,15 @@ describe('Kakao routing adapter', () => {
                   duration: 1200,
                   fare: { taxi: 12000 },
                 },
+                sections: [
+                  {
+                    roads: [
+                      {
+                        vertexes: [127.129, 35.846, 127.14, 35.85, 127.1617, 35.8584],
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           }),
@@ -69,7 +78,16 @@ describe('Kakao routing adapter', () => {
       distanceMeters: 7800,
       durationSeconds: 1200,
       estimatedFareWon: 12000,
+      geometry: {
+        kind: 'LINE_STRING',
+        points: [
+          { latitude: 35.846, longitude: 127.129 },
+          { latitude: 35.85, longitude: 127.14 },
+          { latitude: 35.8584, longitude: 127.1617 },
+        ],
+      },
     })
+    expect(new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.has('summary')).toBe(false)
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       cache: 'no-store',
     })
@@ -119,6 +137,11 @@ describe('Naver routing adapter', () => {
                     duration: 1_200_001,
                     taxiFare: 12000,
                   },
+                  path: [
+                    [127, 35],
+                    [127.05, 35.05],
+                    [127.1, 35.1],
+                  ],
                 },
               ],
             },
@@ -133,5 +156,13 @@ describe('Naver routing adapter', () => {
     )
     expect(result.durationSeconds).toBe(1201)
     expect(result.estimatedFareWon).toBe(12000)
+    expect(result.geometry).toEqual({
+      kind: 'LINE_STRING',
+      points: [
+        { latitude: 35, longitude: 127 },
+        { latitude: 35.05, longitude: 127.05 },
+        { latitude: 35.1, longitude: 127.1 },
+      ],
+    })
   })
 })

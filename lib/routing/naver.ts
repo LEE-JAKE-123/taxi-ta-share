@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { RoutingError } from './errors'
-import { createRouteEvidence } from './evidence'
+import { createRouteEvidence, normalizeRouteGeometry } from './evidence'
 import { fetchJson } from './http'
 import type {
   Coordinates,
@@ -25,6 +25,7 @@ type NaverDirectionsResponse = {
         duration?: unknown
         taxiFare?: unknown
       }
+      path?: unknown
     }>
   }
 }
@@ -62,6 +63,18 @@ function positiveInteger(value: unknown, field: string) {
     )
   }
   return value
+}
+
+function routePoints(path: unknown) {
+  if (!Array.isArray(path)) return undefined
+  const points: Coordinates[] = []
+  for (const point of path) {
+    if (!Array.isArray(point) || point.length < 2) continue
+    const [longitude, latitude] = point
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') continue
+    points.push({ latitude, longitude })
+  }
+  return normalizeRouteGeometry(points)
 }
 
 export const naverRoutingAdapter: RoutingAdapter = {
@@ -137,7 +150,8 @@ export const naverRoutingAdapter: RoutingAdapter = {
     const body = (await fetchJson(url, {
       headers: headers(),
     })) as NaverDirectionsResponse
-    const summary = body.route?.traoptimal?.[0]?.summary
+    const route = body.route?.traoptimal?.[0]
+    const summary = route?.summary
     if (body.code !== 0 || !summary) {
       throw new RoutingError('NOT_FOUND', '자동차 경로를 찾지 못했습니다.')
     }
@@ -164,6 +178,7 @@ export const naverRoutingAdapter: RoutingAdapter = {
       distanceMeters,
       durationSeconds,
       estimatedFareWon,
+      geometry: routePoints(route?.path),
     })
   },
 }

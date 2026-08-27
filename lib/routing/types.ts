@@ -5,6 +5,16 @@ export type Coordinates = {
   longitude: number
 }
 
+/**
+ * A display-only route shape in WGS84 coordinate order. This is intentionally
+ * kept out of persisted route/fare evidence; providers may omit it without
+ * affecting a valid route estimate.
+ */
+export type RouteGeometry = {
+  kind: 'LINE_STRING'
+  points: Coordinates[]
+}
+
 export type PlaceResult = Coordinates & {
   label: string
   provider: RoutingProvider
@@ -21,6 +31,7 @@ export type RouteEstimate = {
   durationSeconds: number
   estimatedFareWon: number | null
   calculatedAt: string
+  geometry?: RouteGeometry
 }
 
 export type RouteEstimateEvidence = RouteEstimate & {

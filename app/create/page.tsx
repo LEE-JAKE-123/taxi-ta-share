@@ -202,7 +202,11 @@ export default function CreateRoomPage() {
             {pending ? '서버에서 경로와 요금을 다시 확인하고 있습니다.' : state.message}
           </p>
 
-          <RouteMap origin={origin} destination={destination} />
+          <RouteMap
+            origin={origin}
+            destination={destination}
+            geometry={estimate?.geometry}
+          />
 
           <div className="space-y-2">
             <label htmlFor="hostMemo" className="text-sm font-bold">
@@ -368,10 +372,18 @@ function DateTimeWheel({
   }, [selected])
 
   useEffect(() => {
-    const selectedOption = wheelRef.current?.querySelector<HTMLElement>(
+    const wheel = wheelRef.current
+    const selectedOption = wheel?.querySelector<HTMLElement>(
       `[data-wheel-value="${selected}"]`,
     )
-    selectedOption?.scrollIntoView({ block: 'center', behavior: 'auto' })
+    if (!wheel || !selectedOption) return
+
+    // Keep picker updates inside the wheel. Element.scrollIntoView() also
+    // scrolls the page, which moved the mobile form after place selection.
+    wheel.scrollTo({
+      top: selectedOption.offsetTop - (wheel.clientHeight - selectedOption.offsetHeight) / 2,
+      behavior: 'auto',
+    })
   }, [options, selected])
 
   useEffect(() => () => {
@@ -449,7 +461,7 @@ function DateTimeWheel({
         />
         <div
           ref={wheelRef}
-          className="h-36 snap-y snap-mandatory overflow-y-auto overscroll-contain scroll-smooth px-1 py-11 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden motion-reduce:scroll-auto"
+          className="h-36 snap-y snap-mandatory overflow-y-auto overscroll-contain scroll-smooth px-1 py-[50px] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden motion-reduce:scroll-auto"
           onWheel={(event) => {
             if (!event.deltaY) return
 
@@ -528,7 +540,7 @@ function DateTimeWheel({
                     if (last) selectAndFocus(last)
                   }
                 }}
-                className="relative z-20 block min-h-11 w-full snap-center rounded-md px-1 text-center text-sm font-semibold leading-none text-foreground transition-[color,background-color,font-size] duration-150 motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:text-muted-foreground disabled:line-through aria-checked:bg-primary aria-checked:text-[21px] aria-checked:text-primary-foreground"
+                className="relative z-20 block h-11 w-full snap-center rounded-md px-1 text-center text-sm font-semibold leading-none text-foreground transition-[color,background-color,font-size] duration-150 motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:text-muted-foreground disabled:line-through aria-checked:bg-primary aria-checked:text-[21px] aria-checked:text-primary-foreground"
               >
                 {option}
               </button>

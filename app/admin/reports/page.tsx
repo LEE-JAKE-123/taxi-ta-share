@@ -297,13 +297,20 @@ export default async function AdminReportsPage({
                     <option value="IN_REVIEW">검토 중으로 변경</option>
                     <option value="RESOLVED">조치 완료</option>
                     <option value="DISMISSED">종결 (조치 없음)</option>
-                    {report.reportedName ? (
-                      <option value="SUSPENDED">이용 정지 및 신고 처리</option>
+                    {report.reportedName && report.reasonCode !== 'NO_SHOW' ? (
+                      <option value="SUSPENDED">신고 기반 이용 정지 지정</option>
                     ) : null}
                   </select>
-                  {report.reportedName ? (
+                  {report.reasonCode === 'NO_SHOW' ? (
+                    <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                      노쇼 신고는 즉시 이용 정지 대상이 아닙니다. 이동 사건 신고와 반박 절차에서
+                      사실관계와 책임을 먼저 확인합니다.
+                    </p>
+                  ) : report.reportedName ? (
                     <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
-                      이용 정지를 선택하면 대상 계정이 즉시 정지되고, 현재 로그인 세션도 해제됩니다. 이 조치는 신고 처리 감사 기록에 남습니다.
+                      신고 기반 이용 정지는 즉시 감사 기록으로 남습니다. 진행 중인 모집·이동·정산 또는
+                      이의가 있으면 해당 이용의 최종 정산 뒤에 계정 정지와 세션 해제가 적용됩니다.
+                      기존 예치금·정산 의무·이의제기는 변경되거나 면제되지 않습니다.
                     </p>
                   ) : null}
                   <label htmlFor={`report-note-${report.reportId}`} className="text-sm font-semibold">

@@ -15,10 +15,10 @@ export function MobileShell({
 }) {
   return (
     <div className="flex min-h-dvh justify-center bg-canvas lg:px-8">
-      <div className="relative flex w-full max-w-[1280px] flex-col bg-background lg:border-x lg:border-hairline">
+      <div className="app-canvas relative flex w-full max-w-[1280px] flex-col lg:border-x lg:border-hairline">
         <div
           className={cn(
-            'flex min-h-dvh flex-col',
+            'flex min-h-dvh flex-col !bg-transparent',
             withTabBar && 'pb-24',
             className,
           )}

@@ -1,84 +1,87 @@
 import { describe, expect, it } from 'vitest'
 import { isDemoAdminLoginAllowed } from './demo-admin'
 
+const demoAdmin = {
+  studentId: '123456789',
+  name: '택시타쉐어관리자',
+  enabled: 'true',
+}
+
 describe('isDemoAdminLoginAllowed', () => {
-  it('blocks the demo admin identity outside the production domain', () => {
-    expect(
-      isDemoAdminLoginAllowed({
-        studentId: '123456789',
-        name: '택시타쉐어관리자',
-        enabled: 'true',
-        host: 'localhost:3000',
-      }),
-    ).toBe(false)
-  })
+  it.each(['localhost:3000', '127.0.0.1:3000'])(
+    'allows the exact demo identity on the loopback development host %s',
+    (host) => {
+      expect(
+        isDemoAdminLoginAllowed({
+          ...demoAdmin,
+          environment: 'development',
+          nodeEnvironment: 'development',
+          host,
+        }),
+      ).toBe(true)
+    },
+  )
 
-  it('blocks the demo admin login when the explicit flag is disabled', () => {
+  it('allows the exact demo identity on the exact production domain', () => {
     expect(
       isDemoAdminLoginAllowed({
-        studentId: '123456789',
-        name: '택시타쉐어관리자',
-        enabled: undefined,
-        host: 'localhost:3000',
-      }),
-    ).toBe(false)
-  })
-
-  it('allows the demo admin login on the exact production domain', () => {
-    expect(
-      isDemoAdminLoginAllowed({
-        studentId: '123456789',
-        name: '택시타쉐어관리자',
-        enabled: 'true',
+        ...demoAdmin,
+        environment: 'production',
+        nodeEnvironment: 'production',
         host: 'taxi-ta-share-phi.vercel.app',
       }),
     ).toBe(true)
   })
 
   it.each([
-    'evil.example',
-    'localhost:3000',
-    'taxi-ta-share.vercel.app',
-    'taxi-ta-share-git-main-example.vercel.app',
-    'preview.taxi-ta-share-phi.vercel.app',
-    'taxi-ta-share-phi.vercel.app:443',
-    'TAXI-TA-SHARE-PHI.VERCEL.APP',
-    null,
-  ])('blocks the production demo admin login for host %s', (host) => {
-    expect(
-      isDemoAdminLoginAllowed({
-        studentId: '123456789',
-        name: '택시타쉐어관리자',
-        enabled: 'true',
-        host,
-      }),
-    ).toBe(false)
-  })
-
-  it.each([
-    ['123456788', '택시타쉐어관리자'],
-    ['123456789', '택시타쉐어관리자아님'],
+    ['development', 'development', 'localhost'],
+    ['development', 'development', 'localhost:3001'],
+    ['development', 'development', '127.0.0.1'],
+    ['development', 'development', '127.0.0.1:3001'],
+    ['development', 'development', '192.168.25.55:3000'],
+    ['development', 'development', '[::1]:3000'],
+    ['development', 'development', 'taxi-ta-share-phi.vercel.app'],
+    ['development', 'production', 'localhost:3000'],
+    ['development', undefined, '127.0.0.1:3000'],
+    ['preview', 'development', 'localhost:3000'],
+    ['preview', 'development', '127.0.0.1:3000'],
+    ['preview', 'development', 'taxi-ta-share-phi.vercel.app'],
+    ['production', 'production', 'localhost:3000'],
+    ['production', 'production', '127.0.0.1:3000'],
+    ['production', 'development', 'taxi-ta-share-phi.vercel.app'],
+    ['production', 'production', 'preview.taxi-ta-share-phi.vercel.app'],
+    ['production', 'production', 'taxi-ta-share-phi.vercel.app:443'],
+    ['production', 'production', 'TAXI-TA-SHARE-PHI.VERCEL.APP'],
+    [undefined, 'development', 'localhost:3000'],
+    [undefined, 'production', 'taxi-ta-share-phi.vercel.app'],
+    ['development', 'development', null],
   ])(
-    'blocks every other identity even on the production domain',
-    (studentId, name) => {
+    'blocks the demo admin login for APP_ENVIRONMENT=%s, NODE_ENV=%s, and host %s',
+    (environment, nodeEnvironment, host) => {
       expect(
         isDemoAdminLoginAllowed({
-          studentId,
-          name,
-          enabled: 'true',
-          host: 'taxi-ta-share-phi.vercel.app',
+          ...demoAdmin,
+          environment,
+          nodeEnvironment,
+          host,
         }),
       ).toBe(false)
     },
   )
 
-  it('blocks the production demo admin login when the flag is disabled', () => {
+  it.each([
+    { enabled: undefined },
+    { enabled: 'false' },
+    { studentId: '123456788' },
+    { name: '택시타쉐어관리자아님' },
+  ])('requires the explicit flag and exact demo identity: %o', (override) => {
     expect(
       isDemoAdminLoginAllowed({
-        studentId: '123456789',
-        name: '택시타쉐어관리자',
-        enabled: 'false',
-        host: 'taxi-ta-share-phi.vercel.app',
+        ...demoAdmin,
+        ...override,
+        environment: 'development',
+        nodeEnvironment: 'development',
+        host: 'localhost:3000',
       }),
     ).toBe(false)
   })

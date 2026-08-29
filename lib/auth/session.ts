@@ -118,6 +118,8 @@ export async function requireAdmin() {
         studentId: user.studentId,
         name: user.name,
         enabled: process.env.DEMO_ADMIN_LOGIN_ENABLED,
+        environment: process.env.APP_ENVIRONMENT,
+        nodeEnvironment: process.env.NODE_ENV,
         host: requestHost,
       })
     ) {

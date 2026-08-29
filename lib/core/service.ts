@@ -17,6 +17,10 @@ import {
   type RoutingProvider,
 } from '@/lib/routing'
 import { verifyPlaceSelectionToken } from '@/lib/routing/place-token'
+import {
+  assertNoPendingSuspensionForNewUse,
+  effectDueAccountSuspensions,
+} from '../safety/suspension'
 
 const MAX_POINTS = MAX_POINT_AMOUNT
 
@@ -652,10 +656,33 @@ export async function getAdminPointDashboard(actorId: string) {
       SELECT
         user_id AS "userId",
         name,
-        student_id AS "studentId"
+        student_id AS "studentId",
+        account_status AS "accountStatus",
+        COALESCE((
+          SELECT sum(d.outstanding_points)::integer
+          FROM point_debt_obligations d
+          WHERE d.user_id = users.user_id
+            AND d.status = 'OPEN'
+        ), 0) AS "settlementDebtOutstanding"
       FROM users
-      WHERE account_status = 'ACTIVE'
-        AND role = 'USER'
+      WHERE role = 'USER'
+        AND (
+          account_status = 'ACTIVE'
+          AND NOT EXISTS (
+            SELECT 1 FROM account_suspension_requests request
+            WHERE request.target_user_id = users.user_id
+              AND request.effective_at IS NULL
+          )
+          OR (
+            account_status = 'SUSPENDED'
+            AND EXISTS (
+              SELECT 1
+              FROM point_debt_obligations d
+              WHERE d.user_id = users.user_id
+                AND d.status = 'OPEN'
+            )
+          )
+        )
         -- These are non-human provider/production verification accounts. They
         -- must never be offered as point recipients in the admin workflow.
         AND lower(btrim(name)) NOT IN (
@@ -755,6 +782,8 @@ export async function getAdminPointDashboard(actorId: string) {
       userId: string
       name: string
       studentId: string
+      accountStatus: 'ACTIVE' | 'SUSPENDED'
+      settlementDebtOutstanding: number
     }>,
     grants: grants as unknown as Array<{
       ledgerId: string
@@ -827,6 +856,20 @@ async function inTransaction<T>(run: (client: PoolClient) => Promise<T>) {
     }
   }
   throw new CoreError('동시 요청을 처리하지 못했습니다. 다시 시도해주세요.')
+}
+
+async function requireActiveUserForAction(client: PoolClient, userId: string) {
+  const result = await client.query(
+    `SELECT 1 FROM users
+     WHERE user_id = $1 AND account_status = 'ACTIVE'
+     FOR SHARE`,
+    [userId],
+  )
+  if (!result.rowCount) {
+    throw new CoreError(
+      '이용 정지된 계정은 실제 요금 입력·확인·이의 제기와 철회 같은 사용자 요청을 할 수 없습니다.',
+    )
+  }
 }
 
 function positiveInteger(value: number, label: string) {
@@ -1087,6 +1130,15 @@ async function assertPolicyV2UsageEligibleForWrite(
   client: PoolClient,
   userId: string,
 ) {
+  try {
+    await assertNoPendingSuspensionForNewUse(client, userId)
+  } catch (error) {
+    throw new CoreError(
+      error instanceof Error
+        ? error.message
+        : '정지 예정 계정은 새 이용을 시작할 수 없습니다.',
+    )
+  }
   const debts = await client.query(
     `SELECT d.trip_id, d.fare_revision
      FROM point_debt_obligations d
@@ -2441,6 +2493,7 @@ async function repayOpenPointDebtsFromGrant(
     reason: string
     grantIdempotencyKey: string
     lockedDebts: readonly OpenPointDebtForRepayment[]
+    grantExecutionRequestId: string | null
   },
 ) {
   const plan = allocateOldestDebtRepayment(input.amount, input.lockedDebts)
@@ -2468,8 +2521,8 @@ async function repayOpenPointDebtsFromGrant(
     await client.query(
       `INSERT INTO point_debt_events (
          debt_id, user_id, event_type, debt_delta, actor_user_id, reason,
-         idempotency_key, repayment_ledger_id
-       ) VALUES ($1, $2, 'REPAYMENT', $3, $4, $5, $6, $7)`,
+         idempotency_key, repayment_ledger_id, grant_execution_request_id
+       ) VALUES ($1, $2, 'REPAYMENT', $3, $4, $5, $6, $7, $8)`,
       [
         repayment.debtId,
         input.userId,
@@ -2478,6 +2531,7 @@ async function repayOpenPointDebtsFromGrant(
         repaymentReason,
         `${input.grantIdempotencyKey}:debt-event:${repayment.debtId}`,
         repaymentLedgerId,
+        input.grantExecutionRequestId,
       ],
     )
   }
@@ -2490,6 +2544,7 @@ export async function createPointGrantExecutionRequest(input: {
   amount: number
   reason: string
   idempotencyKey: string
+  purpose?: string
 }) {
   if (
     !isPointRequestUuid(input.adminId) ||
@@ -2506,6 +2561,10 @@ export async function createPointGrantExecutionRequest(input: {
   }
   const reason = normalizePointReason(input.reason)
   if (!reason) throw new CoreError('지급 사유를 1~200자로 입력해주세요.')
+  const purpose = input.purpose ?? 'GENERAL'
+  if (!['GENERAL', 'SETTLEMENT_DEBT_REPAYMENT'].includes(purpose)) {
+    throw new CoreError('지급 목적이 올바르지 않습니다.')
+  }
 
   return inTransaction(async (client) => {
     const actors = await client.query(
@@ -2521,33 +2580,49 @@ export async function createPointGrantExecutionRequest(input: {
     if (admin?.role !== 'ADMIN' || admin.account_status !== 'ACTIVE') {
       throw new CoreError('활성 관리자만 지급 실행 요청을 만들 수 있습니다.')
     }
-    if (
-      !target ||
-      target.account_status !== 'ACTIVE' ||
-      target.role !== 'USER' ||
-      target.user_id === input.adminId ||
+    const eligibleTarget =
+      target &&
+      target.role === 'USER' &&
+      target.user_id !== input.adminId &&
       [
         'map api',
         'route api',
         'production verification',
         'production verfication',
-      ].includes(String(target.name ?? '').trim().toLowerCase())
-    ) {
-      throw new CoreError('활성 일반 사용자에게만 지급 실행 요청을 만들 수 있습니다.')
+      ].includes(String(target.name ?? '').trim().toLowerCase()) === false
+    if (!eligibleTarget) {
+      throw new CoreError('일반 사용자에게만 지급 실행 요청을 만들 수 있습니다.')
+    }
+    if (purpose === 'GENERAL' && target.account_status !== 'ACTIVE') {
+      throw new CoreError('일반 지급은 활성 사용자에게만 요청할 수 있습니다.')
+    }
+    if (purpose === 'SETTLEMENT_DEBT_REPAYMENT') {
+      const debt = await client.query(
+        `SELECT 1
+         FROM point_debt_obligations
+         WHERE user_id = $1 AND status = 'OPEN'
+         FOR SHARE`,
+        [input.targetUserId],
+      )
+      if (target.account_status !== 'SUSPENDED' || !debt.rowCount) {
+        throw new CoreError(
+          '정산 채무 상환 지원은 미상환 외상이 있는 정지 사용자에게만 요청할 수 있습니다.',
+        )
+      }
     }
 
     const inserted = await client.query(
       `INSERT INTO point_grant_execution_requests (
-         target_user_id, amount, reason, requested_by_admin_id, idempotency_key
-       ) VALUES ($1, $2, $3, $4, $5)
+         target_user_id, amount, reason, purpose, requested_by_admin_id, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT DO NOTHING
        RETURNING execution_request_id`,
-      [input.targetUserId, amount, reason, input.adminId, input.idempotencyKey],
+      [input.targetUserId, amount, reason, purpose, input.adminId, input.idempotencyKey],
     )
     if (inserted.rowCount) return inserted.rows[0].execution_request_id as string
 
     const existing = await client.query(
-      `SELECT execution_request_id, target_user_id, amount, reason
+      `SELECT execution_request_id, target_user_id, amount, reason, purpose
        FROM point_grant_execution_requests
        WHERE requested_by_admin_id = $1 AND idempotency_key = $2`,
       [input.adminId, input.idempotencyKey],
@@ -2557,7 +2632,8 @@ export async function createPointGrantExecutionRequest(input: {
       !row ||
       row.target_user_id !== input.targetUserId ||
       Number(row.amount) !== amount ||
-      row.reason !== reason
+      row.reason !== reason ||
+      row.purpose !== purpose
     ) {
       throw new CoreError(
         '동일한 요청 식별자가 다른 지급 실행 요청에 이미 사용되었습니다.',
@@ -2589,6 +2665,15 @@ export async function requestPoints(input: {
   if (!reason) throw new CoreError('요청 사유를 1~200자로 입력해주세요.')
 
   return inTransaction(async (client) => {
+    try {
+      await assertNoPendingSuspensionForNewUse(client, input.requesterId)
+    } catch (error) {
+      throw new CoreError(
+        error instanceof Error
+          ? error.message
+          : '정지 예정 계정은 새 포인트 요청을 할 수 없습니다.',
+      )
+    }
     const requester = await client.query(
       `SELECT 1
        FROM users
@@ -2806,7 +2891,7 @@ export async function executePointGrantExecution(input: {
     const execution = await client.query(
       `SELECT
          e.execution_request_id, e.source_point_request_id, e.target_user_id,
-         e.amount, e.reason, e.requested_by_admin_id,
+         e.amount, e.reason, e.purpose, e.requested_by_admin_id,
          a.approval_command_id, a.approved_by_admin_id
        FROM point_grant_execution_requests e
        JOIN point_grant_approval_commands a
@@ -2834,12 +2919,35 @@ export async function executePointGrantExecution(input: {
     if (executor?.role !== 'ADMIN' || executor.account_status !== 'ACTIVE') {
       throw new CoreError('활성 관리자만 승인된 지급을 실행할 수 있습니다.')
     }
-    if (!target || target.role !== 'USER' || target.account_status !== 'ACTIVE') {
-      throw new CoreError('활성 일반 사용자에게만 포인트를 지급할 수 있습니다.')
+    const isSettlementDebtRepayment =
+      row.purpose === 'SETTLEMENT_DEBT_REPAYMENT'
+    if (
+      !target ||
+      target.role !== 'USER' ||
+      (isSettlementDebtRepayment
+        ? target.account_status !== 'SUSPENDED'
+        : target.account_status !== 'ACTIVE')
+    ) {
+      throw new CoreError(
+        isSettlementDebtRepayment
+          ? '정산 채무 상환 지원은 정지 상태의 일반 사용자에게만 실행할 수 있습니다.'
+          : '일반 지급은 활성 일반 사용자에게만 실행할 수 있습니다.',
+      )
     }
 
     const ledgerKey = `point-execution:${input.executionRequestId}`
     const lockedDebts = await lockOpenPointDebtsForRepayment(client, row.target_user_id as string)
+    if (isSettlementDebtRepayment) {
+      const outstanding = lockedDebts.reduce(
+        (total, debt) => total + debt.outstandingPoints,
+        0,
+      )
+      if (!outstanding || Number(row.amount) !== outstanding) {
+        throw new CoreError(
+          '정산 채무 상환 지원 금액은 현재 미상환 외상 전체와 같아야 합니다.',
+        )
+      }
+    }
     const inserted = await client.query(
       `INSERT INTO point_ledger (
          user_id, entry_type, available_delta, held_delta, actor_user_id, reason,
@@ -2868,6 +2976,9 @@ export async function executePointGrantExecution(input: {
         reason: row.reason as string,
         grantIdempotencyKey: ledgerKey,
         lockedDebts,
+        grantExecutionRequestId: isSettlementDebtRepayment
+          ? input.executionRequestId
+          : null,
       })
     } else {
       const existing = await client.query(
@@ -3876,6 +3987,7 @@ export async function submitActualFare(input: {
 }) {
   positiveInteger(input.actualFare, '실제 요금')
   await inTransaction(async (client) => {
+    await requireActiveUserForAction(client, input.actorId)
     const trip = await client.query(
       `SELECT host_user_id, status, fare_submitter_user_id
        FROM trip_groups
@@ -4289,6 +4401,7 @@ export async function submitFareDispute(input: {
   }
 
   await inTransaction(async (client) => {
+    await requireActiveUserForAction(client, input.actorId)
     const participant = await client.query(
       `SELECT s.submitted_by, s.fare_revision, p.status, s.allocation_policy
        FROM trip_groups g
@@ -4376,6 +4489,7 @@ export async function withdrawFareDispute(input: {
     throw new CoreError('이의제기 철회 요청 식별자가 올바르지 않습니다.')
   }
   await inTransaction(async (client) => {
+    await requireActiveUserForAction(client, input.actorId)
     const dispute = await client.query(
       `SELECT d.status, d.resolved_by_user_id, d.resolution_idempotency_key,
               g.status AS trip_status, s.status AS settlement_status,
@@ -4920,6 +5034,7 @@ export async function confirmFare(
   idempotencyKey: string,
 ) {
   await inTransaction(async (client) => {
+    await requireActiveUserForAction(client, actorId)
     const participant = await client.query(
       `SELECT 1 FROM trip_groups g
        JOIN trip_participants p ON p.trip_id = g.trip_id
@@ -4962,6 +5077,7 @@ export async function settleTrip(
   idempotencyKey: string,
 ) {
   await inTransaction(async (client) => {
+    await requireActiveUserForAction(client, actorId)
     const trip = await client.query(
       `SELECT g.host_user_id, g.status, s.actual_fare, s.final_share,
               s.participant_count, s.status AS settlement_status,
@@ -5326,7 +5442,16 @@ export async function processDueTransitions() {
     if (result === 'SETTLED') settled += 1
     else skipped += 1
   }
-  return { closed, scannedSettlements: dueSettlements.length, settled, skipped }
+  const effectedSuspensions = await inTransaction((client) =>
+    effectDueAccountSuspensions(client),
+  )
+  return {
+    closed,
+    scannedSettlements: dueSettlements.length,
+    settled,
+    skipped,
+    effectedSuspensions,
+  }
 }
 
 export async function forceSettleFareDisputeByAdmin(input: {

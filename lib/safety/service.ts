@@ -2,6 +2,7 @@ import 'server-only'
 
 import { Pool, type PoolClient } from '@neondatabase/serverless'
 import { CoreError } from '@/lib/core/service'
+import { effectDueAccountSuspensions } from './suspension'
 import {
   ensureDatabaseIdentity,
   getDatabase,
@@ -151,7 +152,9 @@ export async function submitUserReport(input: {
     }
     if (reportedUserId) {
       const target = await client.query(
-        `SELECT user_id FROM users WHERE user_id = $1 FOR SHARE`,
+        `SELECT user_id FROM users
+         WHERE user_id = $1 AND role = 'USER'
+         FOR SHARE`,
         [reportedUserId],
       )
       if (!target.rowCount) throw new CoreError('신고 대상을 찾을 수 없습니다.')
@@ -306,7 +309,7 @@ export async function resolveUserReport(input: {
       throw new CoreError('같은 요청 식별자가 다른 신고 처리에 사용되었습니다.')
     }
     const report = await client.query(
-      `SELECT report_id, reported_user_id, status
+      `SELECT report_id, reported_user_id, reason_code, status
        FROM user_reports WHERE report_id = $1 FOR UPDATE`,
       [input.reportId],
     )
@@ -321,29 +324,53 @@ export async function resolveUserReport(input: {
     if (input.outcome === 'SUSPENDED' && !row.reported_user_id) {
       throw new CoreError('모집 신고로는 사용자 이용 정지를 처리할 수 없습니다.')
     }
-    await client.query(
+    if (input.outcome === 'SUSPENDED' && row.reason_code === 'NO_SHOW') {
+      throw new CoreError(
+        '노쇼 신고는 사건 검토와 반박 절차를 거쳐 처리해야 하므로 즉시 이용 정지할 수 없습니다.',
+      )
+    }
+    if (input.outcome === 'SUSPENDED') {
+      const target = await client.query(
+        `SELECT user_id, role, account_status
+         FROM users
+         WHERE user_id = $1
+         FOR UPDATE`,
+        [row.reported_user_id],
+      )
+      const targetRow = target.rows[0]
+      if (
+        !targetRow ||
+        targetRow.role !== 'USER' ||
+        targetRow.account_status !== 'ACTIVE'
+      ) {
+        throw new CoreError(
+          '활성 상태인 일반 사용자 계정만 즉시 이용 정지할 수 있습니다.',
+        )
+      }
+    }
+    const review = await client.query(
       `INSERT INTO report_review_actions (
          report_id, admin_user_id, action_type, resolution_note, idempotency_key
-       ) VALUES ($1, $2, $3, $4, $5)`,
+       ) VALUES ($1, $2, $3, $4, $5)
+       RETURNING action_id`,
       [input.reportId, input.adminId, actionType, note, input.idempotencyKey],
     )
     if (input.outcome === 'SUSPENDED') {
       await client.query(
-        `INSERT INTO user_enforcement_actions (
-           user_id, report_id, admin_user_id, action_type, reason, idempotency_key
-         ) VALUES ($1, $2, $3, 'SUSPEND', $4, $5)`,
-        [row.reported_user_id, input.reportId, input.adminId, note, input.idempotencyKey],
+        `INSERT INTO account_suspension_requests (
+           target_user_id, requested_by_admin_id, source_type, report_id,
+           report_review_action_id, reason, idempotency_key
+         ) VALUES ($1, $2, 'REPORT', $3, $4, $5, $6)`,
+        [
+          row.reported_user_id,
+          input.adminId,
+          input.reportId,
+          review.rows[0].action_id,
+          note,
+          input.idempotencyKey,
+        ],
       )
-      await client.query(
-        `UPDATE users SET account_status = 'SUSPENDED'
-         WHERE user_id = $1`,
-        [row.reported_user_id],
-      )
-      await client.query(
-        `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, now())
-         WHERE user_id = $1`,
-        [row.reported_user_id],
-      )
+      await effectDueAccountSuspensions(client, row.reported_user_id)
     }
     const status =
       input.outcome === 'IN_REVIEW'

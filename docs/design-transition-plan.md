@@ -1,13 +1,13 @@
-# TaxiTaShare 디자인 톤앤매너 전환 계획 — Premium Mobility v2
+# TaxiTaShare 디자인 톤앤매너 전환 계획 — Quiet Precision v3
 
-- 기준 문서: `docs/design.md`
-- 작성일: 2026-08-23
+- 기준 문서: `docs/design.md` v3.0
+- 갱신일: 2026-08-28
 - 제품 요구사항 기준: `docs/prd.md`
 - 관련 요구사항: `FR-01~05`, `FR-10~22`, `FR-30~40`, `FR-50~55`, 접근성·위치정보·신뢰성 비기능 요구사항
 
 ## 1. 목표와 범위
 
-기존의 Apple-inspired 단일 블루 문법을 Premium Mobility 시각 언어로 전환한다. 순수 흰색 캔버스, 딥 포레스트, 포레스트 에메랄드, 제한적인 세이지 포인트를 사용하고 지도·경로·시간·인원·요금·정산 결과가 디자인의 중심이 되게 한다.
+기존의 Apple-inspired 단일 블루 문법을 Quiet Precision 시각 언어로 전환한다. 순수 흰색 캔버스, 딥 포레스트, 포레스트 에메랄드, 제한적인 세이지 포인트를 사용하고 지도·경로·시간·인원·요금·정산 결과가 디자인의 중심이 되게 한다. v3에서는 카드·CTA 표면 문법뿐 아니라 화면별 주 행동과 숫자·상태의 읽기 순서를 함께 정리한다.
 
 이 작업은 UI 표현과 공통 컴포넌트의 변경이다. 모집/참여 상태 전이, 권한, 포인트 원장, 정산 계산, 지도·AI 추천의 근거와 서버 검증은 변경하지 않는다.
 
@@ -21,6 +21,8 @@
 | 지도 | 대표 시각 콘텐츠, 모바일 map-first | P0 |
 | AI 추천 | brand-soft 정보 블록과 계산 근거 | P1 |
 | 데스크톱 | 지도와 정보 패널 2열 구성 | P1 |
+| 정보 위계 | 금액·상태·경로의 label/value pairing과 numeric 정렬 | P0 |
+| 상호작용 | 짧고 절제된 feedback, reduced-motion 대응 | P1 |
 
 기존 `--action: #0066cc`, `--action-focus`, `--action-on-dark`, 택시 옐로우·민트 CTA/배지 토큰은 deprecated로 처리한다. 짧은 호환 기간 alias는 허용하되 신규 화면·컴포넌트는 새 토큰만 사용한다.
 
@@ -46,15 +48,15 @@
 
 ### Design 2 — Home & Room Cards
 
-대상: `/home`, 모집 카드, AI recommendation block. dark route hero와 route line을 도입하고 비용·인원 정보 위계와 추천 근거를 개선한다.
+대상: `/home`, 모집 카드, AI recommendation block. dark route hero와 route line을 도입하고 비용·인원 정보 위계와 추천 근거를 개선한다. 카드 색상 변주나 그림자 대신 상태→경로→시간→인원/금액 순서를 고정한다.
 
 ### Design 3 — Create & Room Detail
 
-대상: `/create`, `/room/[id]`, `/my-rooms`. step flow, map-first 모바일 구조, desktop 2-column, sticky action/summary와 grouped list를 적용한다.
+대상: `/create`, `/room/[id]`, `/my-rooms`. step flow, map-first 모바일 구조, desktop 2-column, sticky action/summary와 grouped list를 적용한다. 한 section은 한 결정만 다루도록 label·value·help·action을 묶는다.
 
 ### Design 4 — Gathering & Settlement
 
-대상: gathering, `/points`, settlement. live status header, point summary, dark settlement result와 위험 행동 확인 흐름을 적용한다.
+대상: gathering, `/points`, settlement. live status header, point summary, dark settlement result와 위험 행동 확인 흐름을 적용한다. 사용 가능/예치/정산 중 금액을 명확히 구분하고 금액 기준과 분모를 가까이 둔다.
 
 ### Design 5 — Admin & Regression
 
@@ -77,6 +79,7 @@ pnpm build
 - full-pill은 필터·상태 중심으로 제한되고 shadow 없이도 정보 위계가 성립한다.
 - 홈의 route hero와 모집 카드의 출발지·도착지·시간·인원·금액을 빠르게 파악할 수 있다.
 - 정산 결과가 일반 화면과 구분되고 상태를 색상 없이도 이해할 수 있다.
+- 200% 확대, `prefers-reduced-motion`, 지도 loading/error/no-route에서도 정보와 CTA의 의미가 유지된다.
 - 모바일과 데스크톱이 단순 확대가 아니며 기능·DB·권한·포인트 원장 흐름은 바뀌지 않는다.
 
 ## 5. 유지 규칙과 열린 결정

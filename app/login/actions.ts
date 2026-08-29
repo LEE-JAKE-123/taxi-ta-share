@@ -38,6 +38,8 @@ export async function loginAction(
     studentId: parsed.data.studentId,
     name: parsed.data.name,
     enabled: process.env.DEMO_ADMIN_LOGIN_ENABLED,
+    environment: process.env.APP_ENVIRONMENT,
+    nodeEnvironment: process.env.NODE_ENV,
     host: requestHost,
   })
 

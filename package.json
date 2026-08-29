@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname localhost",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -12,6 +12,10 @@
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "db:preflight:0030-0036": "node --env-file-if-exists=.env.local scripts/preflight-0030-0036-migrations.mjs",
     "db:verify": "node --env-file-if-exists=.env.local scripts/verify-db.mjs",
+    "db:verify:suspended-session-guard": "node --env-file-if-exists=.env.local scripts/verify-suspended-session-guard.mjs",
+    "db:verify:user-enforcement-suspension-guard": "node --env-file-if-exists=.env.local scripts/verify-user-enforcement-suspension-guard.mjs",
+    "db:verify:suspended-debt-repayment-assistance": "node --env-file-if-exists=.env.local scripts/verify-suspended-debt-repayment-assistance.mjs",
+    "db:verify:deferred-account-suspensions": "node --env-file-if-exists=.env.local scripts/verify-deferred-account-suspensions.mjs",
     "demo:admin": "node --env-file-if-exists=.env.local scripts/provision-demo-admin.mjs"
   },
   "dependencies": {

@@ -377,6 +377,7 @@ export async function grantAction(formData: FormData) {
         amount: Number(text(formData, 'amount')),
         reason: text(formData, 'reason'),
         idempotencyKey: text(formData, 'idempotencyKey'),
+        purpose: text(formData, 'purpose') || 'GENERAL',
       })
     },
     '포인트 지급 실행 요청을 만들었습니다. 다른 관리자의 승인이 필요합니다.',
@@ -404,6 +405,7 @@ export async function grantPointsAction(formData: FormData) {
       amount: Number(text(formData, 'amount')),
       reason: text(formData, 'reason'),
       idempotencyKey: text(formData, 'idempotencyKey'),
+      purpose: text(formData, 'purpose') || 'GENERAL',
     })
   } catch (error) {
     finishPointPath(
@@ -986,7 +988,12 @@ export async function resolveUserReportAction(formData: FormData) {
       true,
     )
   }
-  finishSafety('/admin/reports', '신고 처리 결과를 기록했습니다.')
+  finishSafety(
+    '/admin/reports',
+    outcome === 'SUSPENDED'
+      ? '신고 기반 이용 정지를 기록했습니다. 진행 중인 모집·이동·정산이 있으면 최종 정산 뒤에 적용되며, 기존 예치금·정산 의무·이의제기는 변경되거나 면제되지 않습니다.'
+      : '신고 처리 결과를 기록했습니다.',
+  )
 }
 
 export async function decideTripIncidentAction(formData: FormData) {

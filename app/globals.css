@@ -150,6 +150,18 @@
     background: linear-gradient(135deg, #12231d 0%, #163428 55%, #285a45 100%);
   }
 
+  .app-canvas {
+    background-color: var(--canvas);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(18, 35, 29, 0.028) 0 0.45px, transparent 0.6px),
+      radial-gradient(circle at 4px 3px, rgba(47, 107, 87, 0.018) 0 0.35px, transparent 0.52px),
+      radial-gradient(115% 34% at 50% -10%, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.28) 38%, transparent 74%),
+      linear-gradient(116deg, rgba(229, 239, 234, 0.34) 0%, transparent 34%, rgba(255, 255, 255, 0.72) 50%, rgba(221, 228, 223, 0.18) 66%, transparent 82%);
+    background-repeat: repeat, repeat, no-repeat, no-repeat;
+    background-size: 9px 11px, 13px 17px, 100% 360px, 100% 520px;
+    background-position: 0 0, 3px 5px, center top, center top;
+  }
+
   .route-grid {
     background-image: linear-gradient(rgba(229, 239, 234, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(229, 239, 234, 0.08) 1px, transparent 1px);
     background-size: 28px 28px;

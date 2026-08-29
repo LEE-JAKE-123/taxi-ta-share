@@ -74,6 +74,7 @@ export async function signupAction(
           AND name = ${name}
           AND gender = ${gender}
           AND school_email = ${schoolEmail}
+          AND account_status = 'ACTIVE'
         ON CONFLICT (token_hash)
         DO UPDATE SET expires_at = EXCLUDED.expires_at, revoked_at = NULL
         RETURNING session_id

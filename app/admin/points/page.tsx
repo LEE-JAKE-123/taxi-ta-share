@@ -74,6 +74,11 @@ export default async function AdminPage({
             <p className="text-xs text-muted-foreground">
               다른 활성 관리자의 승인 후, 기안한 관리자가 원장 지급을 실행합니다.
             </p>
+            <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-5 text-foreground">
+              이용 정지된 대상은 정산 채무 상환 전용으로만 표시됩니다. 상환
+              지원은 현재 남아 있는 정산 채무와 정확히 같은 금액으로만 가능하며,
+              포인트 지급만으로 이용 정지가 해제되지는 않습니다.
+            </p>
             <input
               type="hidden"
               name="idempotencyKey"
@@ -99,9 +104,33 @@ export default async function AdminPage({
                 {data.users.map((user) => (
                   <option key={user.userId} value={user.userId}>
                     {user.name} · {maskStudentId(user.studentId)}
+                    {user.accountStatus === 'SUSPENDED'
+                      ? ` · 이용 정지 · 정산 채무 상환 전용 (${formatPoints(user.settlementDebtOutstanding)})`
+                      : ''}
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label htmlFor="purpose" className="mb-1.5 block text-sm font-medium">
+                지급 목적
+              </label>
+              <select
+                id="purpose"
+                name="purpose"
+                className="app-input"
+                required
+                defaultValue="GENERAL"
+              >
+                <option value="GENERAL">일반 포인트 지급</option>
+                <option value="SETTLEMENT_DEBT_REPAYMENT">
+                  정산 채무 상환 지원
+                </option>
+              </select>
+              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                이용 정지된 사용자는 ‘정산 채무 상환 지원’으로만 지급할 수
+                있습니다. 실제 허용 대상과 금액은 서버가 다시 확인합니다.
+              </p>
             </div>
             <div>
               <label htmlFor="amount" className="mb-1.5 block text-sm font-medium">

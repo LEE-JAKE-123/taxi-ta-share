@@ -148,6 +148,33 @@ const incidentReviewerVariableDisambiguationMigrationChecksum = createHash('sha2
 const escrowShortfallExactDepositGuardMigrationChecksum = createHash('sha256')
   .update(await readFile('db/migrations/0041_escrow_shortfall_exact_deposit_guard.sql'))
   .digest('hex')
+const adminAccountDeactivationMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0042_admin_account_deactivation.sql'))
+  .digest('hex')
+const adminAccountSuspensionSemanticsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0043_admin_account_suspension_semantics.sql'))
+  .digest('hex')
+const suspendedSessionReactivationGuardMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0044_suspended_session_reactivation_guard.sql'))
+  .digest('hex')
+const userEnforcementSuspensionGuardMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0045_user_enforcement_suspension_guard.sql'))
+  .digest('hex')
+const userEnforcementReviewAuditGuardMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0046_user_enforcement_review_audit_guard.sql'))
+  .digest('hex')
+const suspendedDebtRepaymentAssistanceMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0047_suspended_debt_repayment_assistance.sql'))
+  .digest('hex')
+const suspendedSettlementOnlySessionsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0048_suspended_settlement_only_sessions.sql'))
+  .digest('hex')
+const retiredSettlementOnlySessionsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0049_retire_unreachable_settlement_only_sessions.sql'))
+  .digest('hex')
+const deferredAccountSuspensionsMigrationChecksum = createHash('sha256')
+  .update(await readFile('db/migrations/0050_deferred_account_suspensions.sql'))
+  .digest('hex')
 const incidentAndPointSafetyVerificationFiles = [
   'db/verify/0030_predeparture_escrow_guard.sql',
   'db/verify/0031_trip_incident_intake.sql',
@@ -161,6 +188,14 @@ const incidentAndPointSafetyVerificationFiles = [
   'db/verify/0039_escrow_shortfall_legacy_escrow_compat.sql',
   'db/verify/0040_incident_reviewer_variable_disambiguation.sql',
   'db/verify/0041_escrow_shortfall_exact_deposit_guard.sql',
+  'db/verify/0042_admin_account_deactivation.sql',
+  'db/verify/0043_admin_account_suspension_semantics.sql',
+  'db/verify/0044_suspended_session_reactivation_guard.sql',
+  'db/verify/0045_user_enforcement_suspension_guard.sql',
+  'db/verify/0046_user_enforcement_review_audit_guard.sql',
+  'db/verify/0047_suspended_debt_repayment_assistance.sql',
+  'db/verify/0049_retire_unreachable_settlement_only_sessions.sql',
+  'db/verify/0050_deferred_account_suspensions.sql',
 ]
 
 if (
@@ -1253,7 +1288,34 @@ try {
           AND checksum = $5 AND environment = $1) AS incident_reviewer_variable_disambiguation_valid,
        (SELECT count(*) = 1 FROM schema_migrations
         WHERE version = '0041_escrow_shortfall_exact_deposit_guard'
-          AND checksum = $6 AND environment = $1) AS escrow_shortfall_exact_deposit_guard_valid`,
+          AND checksum = $6 AND environment = $1) AS escrow_shortfall_exact_deposit_guard_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0042_admin_account_deactivation'
+          AND checksum = $7 AND environment = $1) AS admin_account_deactivation_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0043_admin_account_suspension_semantics'
+          AND checksum = $8 AND environment = $1) AS admin_account_suspension_semantics_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0044_suspended_session_reactivation_guard'
+          AND checksum = $9 AND environment = $1) AS suspended_session_reactivation_guard_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0045_user_enforcement_suspension_guard'
+          AND checksum = $10 AND environment = $1) AS user_enforcement_suspension_guard_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0046_user_enforcement_review_audit_guard'
+          AND checksum = $11 AND environment = $1) AS user_enforcement_review_audit_guard_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0047_suspended_debt_repayment_assistance'
+          AND checksum = $12 AND environment = $1) AS suspended_debt_repayment_assistance_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0048_suspended_settlement_only_sessions'
+          AND checksum = $13 AND environment = $1) AS suspended_settlement_only_sessions_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0049_retire_unreachable_settlement_only_sessions'
+          AND checksum = $14 AND environment = $1) AS retired_settlement_only_sessions_valid,
+       (SELECT count(*) = 1 FROM schema_migrations
+        WHERE version = '0050_deferred_account_suspensions'
+          AND checksum = $15 AND environment = $1) AS deferred_account_suspensions_valid`,
     [
       expectedEnvironment,
       predepartureEscrowShortfallMigrationChecksum,
@@ -1261,6 +1323,15 @@ try {
       escrowShortfallLegacyEscrowCompatMigrationChecksum,
       incidentReviewerVariableDisambiguationMigrationChecksum,
       escrowShortfallExactDepositGuardMigrationChecksum,
+      adminAccountDeactivationMigrationChecksum,
+      adminAccountSuspensionSemanticsMigrationChecksum,
+      suspendedSessionReactivationGuardMigrationChecksum,
+      userEnforcementSuspensionGuardMigrationChecksum,
+      userEnforcementReviewAuditGuardMigrationChecksum,
+      suspendedDebtRepaymentAssistanceMigrationChecksum,
+      suspendedSettlementOnlySessionsMigrationChecksum,
+      retiredSettlementOnlySessionsMigrationChecksum,
+      deferredAccountSuspensionsMigrationChecksum,
     ],
   )
   const failedEscrowShortfallMigrationChecks = Object.entries(

@@ -21,7 +21,7 @@ export function TabBar() {
       aria-label="주요 메뉴"
       className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1280px]"
     >
-      <div className="border-t border-hairline bg-surface/90 backdrop-blur-xl backdrop-saturate-150">
+      <div className="border-t border-hairline bg-surface shadow-[0_12px_32px_rgba(18,35,29,0.12)]">
         <ul className="safe-area-bottom-2 flex items-stretch justify-between px-2 pt-2">
           {tabs.map((t) => (
             <TabItem key={t.href} {...t} active={pathname === t.href} />
@@ -50,7 +50,7 @@ function TabItem({
       <Link
         href={href}
         className={cn(
-          'flex min-h-11 w-full flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[11px] font-medium outline-none transition-[transform,color,background-color] duration-150 motion-reduce:transition-none active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+          'flex min-h-11 w-full flex-col items-center justify-center gap-1 rounded-[14px] py-1.5 text-[11px] font-medium outline-none transition-[transform,color,background-color] duration-150 motion-reduce:transition-none active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
           isCreateTab
             ? 'bg-primary text-primary-foreground hover:bg-action-focus'
             : active

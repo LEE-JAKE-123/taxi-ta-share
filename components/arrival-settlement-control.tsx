@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import { Calculator, Flag } from 'lucide-react'
 import { submitJourneyFareAction } from '@/app/core/actions'
 import { PendingSubmitButton } from '@/components/pending-submit-button'
+import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 
 export function ArrivalSettlementControl({
@@ -24,14 +25,15 @@ export function ArrivalSettlementControl({
 
   return (
     <>
-      <button
+      <Button
         type="button"
         onClick={openFareModal}
-        className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-[17px] font-normal text-primary-foreground transition-transform active:scale-95 focus-visible:ring-2 focus-visible:ring-ring"
+        size="lg"
+        className="w-full"
       >
         <Flag className="size-5" aria-hidden />
         도착
-      </button>
+      </Button>
 
       <Modal
         open={open}
@@ -95,13 +97,14 @@ export function ArrivalSettlementControl({
               <Calculator className="size-5" aria-hidden />
               실제 요금 제출
             </PendingSubmitButton>
-            <button
+            <Button
               type="button"
               onClick={close}
-              className="min-h-11 rounded-full border border-border px-5 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
+              variant="secondary"
+              size="sm"
             >
               취소
-            </button>
+            </Button>
           </form>
         </div>
       </Modal>

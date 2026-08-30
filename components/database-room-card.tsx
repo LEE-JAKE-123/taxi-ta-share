@@ -80,15 +80,15 @@ export function DatabaseRoomCard({
       aria-label={`${roomStatusLabel(room.status)} 방`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <StatusBadge tone={isOpen ? 'mint' : 'muted'}>
+        <StatusBadge variant={isOpen ? 'success' : 'neutral'}>
           {roomStatusLabel(room.status)}
         </StatusBadge>
-        <StatusBadge tone={availableSeats > 0 ? 'brand' : 'muted'} icon={Users}>
+        <StatusBadge variant={availableSeats > 0 ? 'brand' : 'neutral'} icon={Users}>
           {room.approvedCount}/{room.maxParticipants}명
         </StatusBadge>
-        {isHost ? <StatusBadge tone="info">내가 만든 방</StatusBadge> : null}
+        {isHost ? <StatusBadge variant="brand">내가 만든 방</StatusBadge> : null}
         {!isHost && userStatus ? (
-          <StatusBadge tone="info">내 상태: {userStatus}</StatusBadge>
+          <StatusBadge variant="brand">내 상태: {userStatus}</StatusBadge>
         ) : null}
       </div>
 

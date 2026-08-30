@@ -1,7 +1,7 @@
 # TaxiTaShare Design System — Quiet Precision
 
-- 문서 버전: v3.0
-- 갱신일: 2026-08-28
+- 문서 버전: v3.1
+- 갱신일: 2026-08-30
 - 적용 대상: TaxiTaShare 전체 사용자·관리자 화면
 - 제품 기준 문서: `docs/prd.md`
 
@@ -10,6 +10,22 @@ TaxiTaShare는 **Quiet Precision, Premium Mobility, Calm Confidence**를 핵심 
 `Quiet Precision`은 화려함을 뜻하지 않는다. 충분한 여백, 절제된 색, 정확히 정렬된 수치, 지도의 깊이감, 필요한 순간에만 드러나는 움직임으로 신뢰를 만든다. 사용자는 화면이 고급스럽다고 느끼는 동시에 정산 금액과 상태를 절대 오해하지 않아야 한다.
 
 디자인 키워드: `Deep Forest` · `Porcelain` · `Forest Emerald` · `Route Ribbon` · `Editorial Utility` · `Soft Depth` · `Quiet Luxury`
+
+## 0. 문서 역할과 운영 기준
+
+이 문서는 TaxiTaShare UI의 **사람이 읽는 디자인 계약**이다. 제품 요구사항, 접근성, 안전 및 금액·상태의 명확성은 시각적 표현보다 우선한다. 화면이나 컴포넌트를 바꿀 때는 이 문서와 `docs/prd.md`를 함께 확인한다.
+
+| 구분 | 기준 | 책임 |
+|---|---|---|
+| 제품 동작·권한·상태·금액 | `docs/prd.md` | UI가 의미를 바꾸지 않도록 보호 |
+| 디자인 의도·사용 규칙 | 이 문서 | 토큰, 컴포넌트, 패턴, 에셋, 문구의 공통 언어 |
+| 구현 토큰 | `app/globals.css` | CSS 변수와 Tailwind/shadcn alias의 실제 값 |
+| 화면 전환 순서·회귀 기준 | `docs/design-transition-plan.md` | 기존 화면을 안전하게 전환하는 실행 계획 |
+| 패턴·에셋·문구·변경 절차 | `docs/design-changes/TaxiTaShare_design_system_operations_foundations_v1.md` | 화면 조립과 운영의 상세 계약 |
+
+CSS의 값과 이 문서의 표가 달라지면, 구현을 임의로 따르지 말고 왜 다른지 먼저 확인한다. 값 변경은 `app/globals.css`, 이 문서의 토큰 표, 영향을 받는 공통 컴포넌트를 한 변경 단위로 다룬다.
+
+TaxiTaShare는 SEED와 같은 외부 디자인 시스템의 **운영 방식**(Foundations → Components → Patterns → 변경 관리)은 참고하지만, 색상·에셋·문구·컴포넌트 외형을 복제하지 않는다. 이 시스템의 브랜드 기준은 Quiet Precision이다.
 
 ## 1. 시각 언어 원칙
 

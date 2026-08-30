@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { buttonVariants } from '@/components/ui/button'
 
 export function TopBar({
   title,
@@ -24,17 +25,26 @@ export function TopBar({
   return (
     <header
       className={cn(
-        'sticky top-0 z-30 flex min-h-[60px] items-center gap-2 border-b border-border bg-canvas/90 px-5 py-2 backdrop-blur-xl backdrop-saturate-150',
+        'sticky top-0 z-30 flex min-h-[60px] items-center gap-2 border-b border-hairline bg-canvas px-5 py-2',
         className,
       )}
     >
       {back ? (
         onBack ? (
-          <button type="button" onClick={onBack} aria-label="뒤로가기" className="flex size-11 shrink-0 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-muted active:scale-[0.98]">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="뒤로 가기"
+            className={cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }), 'shrink-0')}
+          >
             <ChevronLeft className="size-5" />
           </button>
         ) : (
-          <Link href={backHref} aria-label="뒤로가기" className="flex size-11 shrink-0 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-muted active:scale-[0.98]">
+          <Link
+            href={backHref}
+            aria-label="뒤로 가기"
+            className={cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }), 'shrink-0')}
+          >
             <ChevronLeft className="size-5" />
           </Link>
         )

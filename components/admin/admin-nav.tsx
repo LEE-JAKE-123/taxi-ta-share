@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { buttonVariants } from '@/components/ui/button'
 
 const items = [
   ['/admin', '대시보드'],
@@ -15,17 +16,23 @@ export function AdminNav() {
   return (
     <nav
       aria-label="관리자 메뉴"
-      className="flex gap-2 overflow-x-auto border-b border-border px-4 py-3"
+      className="border-b border-hairline bg-surface"
     >
-      {items.map(([href, label]) => (
-        <Link
-          key={href}
-          href={href}
-          className="min-h-10 shrink-0 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold"
-        >
-          {label}
-        </Link>
-      ))}
+      <div className="mx-auto flex max-w-[1280px] gap-2 overflow-x-auto px-4 py-3 sm:px-5">
+        {items.map(([href, label]) => (
+          <Link
+            key={href}
+            href={href}
+            className={buttonVariants({
+              variant: 'secondary',
+              size: 'sm',
+              className: 'shrink-0',
+            })}
+          >
+            {label}
+          </Link>
+        ))}
+      </div>
     </nav>
   )
 }

@@ -20,16 +20,16 @@ export function RoomCard({ room }: { room: Room }) {
     >
       <div className="flex flex-wrap items-center gap-1.5">
         {closed ? (
-          <StatusBadge tone="muted">모집 마감</StatusBadge>
+          <StatusBadge variant="neutral">모집 마감</StatusBadge>
         ) : (
-          <StatusBadge tone="mint">모집 중</StatusBadge>
+          <StatusBadge variant="success">모집 중</StatusBadge>
         )}
         {!closed && seatsLeft > 0 ? (
-          <StatusBadge tone="brand" icon={Users}>
+          <StatusBadge variant="brand" icon={Users}>
             {seatsLeft}자리 남음
           </StatusBadge>
         ) : null}
-        <StatusBadge tone="warn" icon={Clock}>
+        <StatusBadge variant="warning" icon={Clock}>
           출발 {room.minutesUntilDepart}분 전
         </StatusBadge>
       </div>

@@ -7,6 +7,7 @@ import { BigButton, BottomBar } from '@/components/bottom-bar'
 import { MobileShell } from '@/components/mobile-shell'
 import { RouteMap } from '@/components/route-map'
 import { TopBar } from '@/components/top-bar'
+import { Button } from '@/components/ui/button'
 import type { RouteEstimate, SelectablePlaceResult } from '@/lib/routing/types'
 
 const initialState: CreateTripState = {}
@@ -135,11 +136,23 @@ export default function CreateRoomPage() {
         <PlaceInputs prefix="origin" place={origin} />
         <PlaceInputs prefix="destination" place={destination} />
 
-        <fieldset disabled={pending} className="flex flex-1 flex-col gap-5 px-5 py-5 pb-32 disabled:opacity-70">
+        <fieldset disabled={pending} className="flex flex-1 flex-col gap-6 px-4 py-5 pb-32 disabled:opacity-70 min-[391px]:px-5 lg:mx-auto lg:w-full lg:max-w-5xl lg:px-8">
+          <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(28.5rem,1fr)]">
+            <div className="flex min-w-0 flex-col gap-6 lg:h-full">
           <PlaceSearch label="출발지" icon={MapPin} selected={origin} onSelect={(place) => { setOrigin(place); setEstimate(null) }} error={state.fieldErrors?.origin?.[0]} />
           <PlaceSearch label="목적지" icon={Flag} selected={destination} onSelect={(place) => { setDestination(place); setEstimate(null) }} error={state.fieldErrors?.destination?.[0]} />
 
-          <fieldset>
+          <RouteMap
+            origin={origin}
+            destination={destination}
+            geometry={estimate?.geometry}
+            className="min-h-[19rem] sm:min-h-[22rem] lg:min-h-[19rem] lg:flex-1"
+          />
+
+            </div>
+
+            <div className="flex w-full min-w-0 flex-col gap-6 lg:gap-2">
+          <fieldset className="w-full min-w-0 rounded-[18px] border border-hairline bg-surface p-4 lg:p-2.5">
             <legend className="mb-2 text-sm font-bold">
               <Calendar className="mr-1.5 inline size-4" aria-hidden /> 출발 시각
             </legend>
@@ -149,26 +162,30 @@ export default function CreateRoomPage() {
                 { label: '+30분', minutes: 30 },
                 { label: '+1시간', minutes: 60 },
               ].map((option) => (
-                <button
+                <Button
                   key={option.minutes}
                   type="button"
                   onClick={() => selectRelativeDeparture(option.minutes)}
-                  className="min-h-11 flex-1 rounded-full border border-border bg-card px-2 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  variant="secondary"
+                  size="xs"
+                  className="flex-1"
                 >
                   {option.label}
-                </button>
+                </Button>
               ))}
-              <button
+              <Button
                 type="button"
                 onClick={resetDeparture}
-                className="flex size-11 shrink-0 items-center justify-center rounded-full border border-border bg-card text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                variant="secondary"
+                size="icon-xs"
+                className="shrink-0"
                 aria-label="현재 시간으로 초기화"
                 title="현재 시간으로 초기화"
               >
                 <RotateCcw className="size-4" aria-hidden />
-              </button>
+              </Button>
             </div>
-            <div className="mt-3">
+            <div className="mt-3 lg:mt-2">
               <DateTimePicker
                 date={departureDate}
                 time={departureTime}
@@ -179,16 +196,16 @@ export default function CreateRoomPage() {
                 onTimeChange={(nextTime) => updateDeparture(departureDate, nextTime)}
               />
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-2 text-xs text-muted-foreground lg:mt-1">
               각 항목을 선택해 설정하세요. 시간은 10분 단위로 설정할 수 있습니다.
             </p>
           </fieldset>
 
-          <fieldset>
+          <fieldset className="w-full min-w-0 rounded-[18px] border border-hairline bg-surface p-4 lg:p-2.5">
             <legend className="mb-2 text-sm font-bold"><Users className="mr-1.5 inline size-4" aria-hidden />최대 인원</legend>
             <div className="grid grid-cols-3 gap-2">
               {[2, 3, 4].map((count) => (
-                <label key={count} className="rounded-full border bg-card py-3 text-center text-sm font-semibold has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:text-primary-foreground">
+                <label key={count} className="rounded-full border border-hairline bg-surface py-3 text-center text-sm font-semibold has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:text-primary-foreground">
                   <input className="sr-only" type="radio" name="maxParticipants" value={count} checked={maxParticipants === count} onChange={() => setMaxParticipants(count)} />
                   {count}명
                 </label>
@@ -198,17 +215,15 @@ export default function CreateRoomPage() {
 
           <RouteSummary estimate={estimate} loading={estimating} error={estimateError} participants={maxParticipants} onRetry={() => setEstimateRetry((value) => value + 1)} />
 
-          <p className="min-h-5 text-sm text-destructive" aria-live="polite">
-            {pending ? '서버에서 경로와 요금을 다시 확인하고 있습니다.' : state.message}
-          </p>
+          {pending || state.message ? (
+            <p className="min-h-5 text-sm text-destructive" aria-live="polite">
+              {pending ? '서버에서 경로와 요금을 다시 확인하고 있습니다.' : state.message}
+            </p>
+          ) : null}
 
-          <RouteMap
-            origin={origin}
-            destination={destination}
-            geometry={estimate?.geometry}
-          />
+          </div>
 
-          <div className="space-y-2">
+          <div className="w-full min-w-0 space-y-2 rounded-[18px] border border-hairline bg-surface p-4 lg:col-span-2 lg:p-2.5">
             <label htmlFor="hostMemo" className="text-sm font-bold">
               방장 전달사항 <span className="font-normal text-muted-foreground">(선택)</span>
             </label>
@@ -224,6 +239,7 @@ export default function CreateRoomPage() {
             <p id="hostMemo-help" className="text-xs text-muted-foreground">
               참여 희망자와 참가자에게 표시됩니다. 개인정보 없이 60자 이내로 작성해 주세요.
             </p>
+            </div>
           </div>
         </fieldset>
         <BottomBar>
@@ -310,8 +326,8 @@ function DateTimePicker({
     date === minDate && `${toTwentyFourHour(nextPeriod, nextHour)}:${nextMinute}` < minTime
 
   return (
-    <div className="rounded-xl border border-border bg-card p-3" aria-label="출발 일시 선택기">
-      <div className="grid grid-cols-[minmax(2.375rem,0.78fr)_minmax(2rem,0.64fr)_minmax(2rem,0.64fr)_minmax(3.25rem,1.08fr)_minmax(2.875rem,1fr)_minmax(2.875rem,1fr)] gap-1">
+    <div className="rounded-[14px] border border-hairline bg-surface p-3 sm:p-4 lg:p-2.5" aria-label="출발 일시 선택기">
+      <div className="grid grid-cols-[minmax(4.75rem,1.35fr)_minmax(3.25rem,1fr)_minmax(3.25rem,1fr)] gap-2 sm:grid-cols-[minmax(4.75rem,0.9fr)_minmax(3.25rem,0.65fr)_minmax(3.25rem,0.65fr)_minmax(5.375rem,1.05fr)_minmax(3.25rem,0.65fr)_minmax(3.25rem,0.65fr)] sm:gap-1">
         <DateTimeWheel label="년" options={years} selected={year} onSelect={(next) => updateDate(next, month, day)} />
         <DateTimeWheel label="월" options={months} selected={month} onSelect={(next) => updateDate(year, next, day)} />
         <DateTimeWheel label="일" options={days} selected={day} onSelect={(next) => updateDate(year, month, next)} />
@@ -341,7 +357,7 @@ function DateTimePicker({
           isDisabled={(next) => isPastTime(period, hour, next)}
         />
       </div>
-      <p className="mt-3 text-center text-xs font-semibold" aria-live="polite">
+      <p className="mt-3 text-center text-xs font-semibold lg:mt-2" aria-live="polite">
         선택한 출발 시각: {date} {period} {hour}:{minute}
       </p>
     </div>
@@ -461,7 +477,7 @@ function DateTimeWheel({
         />
         <div
           ref={wheelRef}
-          className="h-36 snap-y snap-mandatory overflow-y-auto overscroll-contain scroll-smooth px-1 py-[50px] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden motion-reduce:scroll-auto"
+          className="h-36 snap-y snap-mandatory overflow-y-auto overscroll-contain scroll-smooth px-1 py-[50px] lg:h-28 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden motion-reduce:scroll-auto"
           onWheel={(event) => {
             if (!event.deltaY) return
 
@@ -653,7 +669,7 @@ function PlaceSearch({ label, icon: Icon, selected, onSelect, error }: {
 
   return <div>
     <label htmlFor={inputId} className="mb-2 block text-sm font-bold"><Icon className="mr-1.5 inline size-4" aria-hidden />{label}</label>
-    <input id={inputId} value={query} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} onChange={(event) => { setQuery(event.target.value); if (selected) onSelect(null) }} maxLength={100} className="app-input focus-visible:ring-2 focus-visible:ring-ring" placeholder={`${label} 2글자 이상 입력`} />
+    <input id={inputId} value={query} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} onChange={(event) => { setQuery(event.target.value); if (selected) onSelect(null) }} maxLength={100} className="app-input app-input-search focus-visible:ring-2 focus-visible:ring-ring" placeholder={`${label} 2글자 이상 입력`} />
     {canSearch && searching ? <p className="mt-2 text-xs text-muted-foreground" role="status" aria-live="polite">장소를 찾는 중...</p> : null}
     {canSearch && completedQuery === normalizedQuery && places.length ? <ul className="mt-2 rounded-[18px] border bg-card p-1">{places.map((place) => <li key={`${place.provider}:${place.providerPlaceId}`}><button type="button" onClick={() => { onSelect(place); setPlaces([]); setQuery(place.label) }} className="min-h-11 w-full rounded-xl px-4 py-3 text-left text-base hover:bg-muted">{place.label}</button></li>)}</ul> : null}
     {canSearch && completedQuery === normalizedQuery && !searching && !message && !places.length ? <p className="mt-2 text-xs text-muted-foreground" role="status">일치하는 장소가 없습니다.</p> : null}
@@ -671,12 +687,12 @@ function PlaceSearch({ label, icon: Icon, selected, onSelect, error }: {
 }
 
 function RouteSummary({ estimate, loading, error, participants, onRetry }: { estimate: RouteEstimate | null; loading: boolean; error: string; participants: number; onRetry: () => void }) {
-  if (loading) return <p className="rounded-xl bg-muted p-3 text-sm">경로와 예상 요금을 조회하는 중...</p>
-  if (error) return <div className="rounded-xl bg-warn-soft p-3 text-sm text-destructive" role="alert"><p>{error}</p><button type="button" onClick={onRetry} className="mt-2 min-h-9 rounded-lg border px-3 font-bold focus-visible:ring-2 focus-visible:ring-ring">경로 다시 시도</button></div>
+  if (loading) return <p className="rounded-[18px] bg-surface-subtle p-4 text-sm lg:p-2.5" role="status">경로와 예상 요금을 조회하는 중...</p>
+  if (error) return <div className="rounded-[18px] border border-warning bg-warn-soft p-4 text-sm text-destructive lg:p-2.5" role="alert"><p>{error}</p><Button type="button" variant="secondary" size="sm" onClick={onRetry} className="mt-3">경로 다시 시도</Button></div>
   if (!estimate) return null
-  return <dl className="grid grid-cols-2 gap-3 rounded-xl bg-muted p-3 text-sm">
+  return <dl className="grid grid-cols-2 gap-4 rounded-[18px] border border-hairline bg-surface p-4 text-sm lg:gap-2 lg:p-2.5">
     <div><dt className="text-xs text-muted-foreground">거리 · 시간</dt><dd className="font-bold">{(estimate.distanceMeters / 1000).toFixed(1)}km · {Math.ceil(estimate.durationSeconds / 60)}분</dd></div>
     <div><dt className="text-xs text-muted-foreground">예상 총요금</dt><dd className="font-bold">{estimate.estimatedFareWon === null ? '지도 API 요금 정보 없음' : `${estimate.estimatedFareWon.toLocaleString('ko-KR')}원`}</dd></div>
-    <div className="col-span-2"><dt className="text-xs text-muted-foreground">최대 인원 기준 1인 예치</dt><dd className="font-extrabold">{estimate.estimatedFareWon === null ? '계산할 수 없음' : `${Math.ceil(estimate.estimatedFareWon / participants).toLocaleString('ko-KR')}P`}</dd></div>
+    <div className="col-span-2 border-t border-hairline pt-3"><dt className="text-xs text-muted-foreground">최대 인원 기준 1인 예치</dt><dd className="numeric mt-1 font-extrabold">{estimate.estimatedFareWon === null ? '계산할 수 없음' : `${Math.ceil(estimate.estimatedFareWon / participants).toLocaleString('ko-KR')}P`}</dd></div>
   </dl>
 }

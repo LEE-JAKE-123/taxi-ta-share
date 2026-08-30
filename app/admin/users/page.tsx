@@ -3,6 +3,7 @@ import { deactivateAdminUserAction } from './actions'
 import { AdminUserDeactivationControl } from '@/components/admin/admin-user-deactivation-control'
 import { AdminReadPage } from '@/components/admin/admin-read-page'
 import { Card } from '@/components/ui/card'
+import { StatusBadge } from '@/components/status-badge'
 import { requireAdmin } from '@/lib/auth/session'
 import {
   getAdminUsers,
@@ -64,12 +65,12 @@ export default async function AdminUsersPage({
       </p>
 
       {result === 'scheduled' ? (
-        <p className="rounded-[14px] bg-mint-soft px-4 py-3 text-sm" role="status">
+        <p className="rounded-[14px] border border-success/20 bg-success-soft px-4 py-3 text-sm text-success" role="status">
           관리자 지정 이용 정지를 기록했습니다. 진행 중인 이용이 있으면 최종 정산 뒤에 적용됩니다.
         </p>
       ) : null}
       {result === 'failed' ? (
-        <p className="rounded-[14px] bg-warn-soft px-4 py-3 text-sm" role="alert">
+        <p className="rounded-[14px] border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">
           이용 정지 지정에 실패했습니다. 계정 상태와 중복 요청 여부를 확인한 뒤 다시 시도하세요.
         </p>
       ) : null}
@@ -79,7 +80,7 @@ export default async function AdminUsersPage({
           users.map((user) => (
             <Card
               key={user.userId}
-              className="flex flex-col gap-4 p-4 lg:flex-row lg:items-stretch lg:gap-5"
+              className="flex flex-col gap-4 p-5 lg:flex-row lg:items-stretch lg:gap-5"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -94,13 +95,13 @@ export default async function AdminUsersPage({
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-4">
                   <div>
                     <dt className="text-xs text-muted-foreground">사용 가능</dt>
-                    <dd className="mt-1 font-semibold">
+                    <dd className="mt-1 font-semibold tabular-nums">
                       {Number(user.availablePoints).toLocaleString('ko-KR')}P
                     </dd>
                   </div>
                   <div>
                     <dt className="text-xs text-muted-foreground">예치 포인트</dt>
-                    <dd className="mt-1 font-semibold">
+                    <dd className="mt-1 font-semibold tabular-nums">
                       {Number(user.heldPoints).toLocaleString('ko-KR')}P
                     </dd>
                   </div>
@@ -116,9 +117,12 @@ export default async function AdminUsersPage({
               <aside className="flex flex-row items-center justify-between gap-3 border-t border-hairline pt-4 lg:w-44 lg:flex-col lg:items-end lg:border-t-0 lg:border-l lg:pl-5 lg:pt-0">
                 <div className="text-right text-sm">
                   <p className="font-bold text-ink">{roleLabel(user.role)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {accountStatusLabel(user.accountStatus)} · {user.accountStatus}
-                  </p>
+                  <div className="mt-2">
+                    <StatusBadge
+                      variant={accountStatusVariant(user.accountStatus)}
+                      label={`${accountStatusLabel(user.accountStatus)} · ${user.accountStatus}`}
+                    />
+                  </div>
                   {user.pendingSuspensionSource ? (
                     <p className="mt-1 text-xs font-semibold text-warn">
                       정지 예정 · {user.pendingSuspensionSource === 'REPORT' ? '신고 기반' : '관리자 지정'}
@@ -161,6 +165,13 @@ function accountStatusLabel(status: string) {
   if (status === 'SUSPENDED') return '이용 정지'
   if (status === 'DELETED') return '비활성'
   return status
+}
+
+function accountStatusVariant(status: string) {
+  if (status === 'ACTIVE') return 'success' as const
+  if (status === 'SUSPENDED') return 'warning' as const
+  if (status === 'DELETED') return 'neutral' as const
+  return 'neutral' as const
 }
 
 function formatLastActivity(value: string | null) {

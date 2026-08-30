@@ -1,28 +1,28 @@
 import { cn } from '@/lib/utils'
 
-type Tone = 'brand' | 'mint' | 'info' | 'warn' | 'muted'
+type BadgeVariant = 'neutral' | 'brand' | 'success' | 'warning' | 'danger'
 type Kind = 'status' | 'emphasis'
 
-const toneStyles: Record<Tone, string> = {
+const variantStyles: Record<BadgeVariant, string> = {
+  neutral: 'border-hairline bg-surface-subtle text-ink-secondary',
   brand: 'border-brand/20 bg-brand-soft text-brand-strong',
-  mint: 'border-success/20 bg-success-soft text-success',
-  info: 'border-info/20 bg-info-soft text-info',
-  warn: 'border-warning/20 bg-warning-soft text-warning',
-  muted: 'border-hairline bg-surface-subtle text-ink-secondary',
+  success: 'border-success/20 bg-success-soft text-success',
+  warning: 'border-warning/20 bg-warning-soft text-warning',
+  danger: 'border-danger/20 bg-danger-soft text-danger',
 }
-const toneLabels: Record<Tone, string> = {
+const variantLabels: Record<BadgeVariant, string> = {
+  neutral: '일반 상태',
   brand: '주요 상태',
-  mint: '완료 상태',
-  info: '안내 상태',
-  warn: '주의 상태',
-  muted: '일반 상태',
+  success: '완료 상태',
+  warning: '주의 상태',
+  danger: '위험 상태',
 }
 
 export function StatusBadge({
   children,
   label,
   helper,
-  tone = 'muted',
+  variant = 'neutral',
   kind = 'status',
   className,
   icon: Icon,
@@ -33,23 +33,25 @@ export function StatusBadge({
   label?: React.ReactNode
   /** Optional supporting detail; it is announced with the status label. */
   helper?: React.ReactNode
-  tone?: Tone
+  variant?: BadgeVariant
   kind?: Kind
   className?: string
   icon?: React.ComponentType<{ className?: string }>
 }) {
-  const visibleLabel = label ?? children ?? toneLabels[tone]
+  const statusLabel = variantLabels[variant]
+  const visibleLabel = label ?? children ?? statusLabel
 
   return (
     <span
       role={kind === 'status' ? 'status' : undefined}
+      data-variant={variant}
       className={cn(
         'inline-flex min-h-7 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold tracking-[-0.01em]',
-        toneStyles[tone],
+        variantStyles[variant],
         className,
       )}
     >
-      {kind === 'status' ? <span className="sr-only">{toneLabels[tone]}: </span> : null}
+      {kind === 'status' ? <span className="sr-only">{statusLabel}: </span> : null}
       {Icon ? <Icon className="size-3.5" aria-hidden="true" /> : null}
       <span>{visibleLabel}</span>
       {helper ? <span className="text-[11px] font-normal opacity-80">· {helper}</span> : null}

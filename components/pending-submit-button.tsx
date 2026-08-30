@@ -3,6 +3,7 @@
 import { useFormStatus } from 'react-dom'
 import { LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 
 export function PendingSubmitButton({
   children,
@@ -20,13 +21,15 @@ export function PendingSubmitButton({
   const { pending } = useFormStatus()
 
   return (
-    <button
+    <Button
       type="submit"
+      variant="primary"
+      size="lg"
       disabled={disabled || pending}
       aria-disabled={disabled || pending}
       aria-label={ariaLabel}
       className={cn(
-        'inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-[17px] font-normal text-primary-foreground transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100',
+        'w-full',
         className,
       )}
     >
@@ -38,6 +41,6 @@ export function PendingSubmitButton({
       ) : (
         children
       )}
-    </button>
+    </Button>
   )
 }

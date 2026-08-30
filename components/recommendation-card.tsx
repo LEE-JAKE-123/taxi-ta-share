@@ -11,13 +11,13 @@ export function RecommendationCard({
   recommendation: RankedRecommendation
 }) {
   return (
-    <Card className="flex flex-col gap-5 border-brand/35 bg-surface">
+    <Card variant="selected" className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <StatusBadge tone="brand" icon={Sparkles}>
+        <StatusBadge variant="brand" icon={Sparkles}>
           추천
         </StatusBadge>
-        <StatusBadge tone="mint">모집 중</StatusBadge>
-        <StatusBadge tone="info" icon={Users}>
+        <StatusBadge variant="success">모집 중</StatusBadge>
+        <StatusBadge variant="brand" icon={Users}>
           {recommendation.approvedCount}/{recommendation.maxParticipants}명
         </StatusBadge>
       </div>

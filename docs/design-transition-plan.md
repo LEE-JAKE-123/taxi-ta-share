@@ -1,7 +1,8 @@
 # TaxiTaShare 디자인 톤앤매너 전환 계획 — Quiet Precision v3
 
-- 기준 문서: `docs/design.md` v3.0
-- 갱신일: 2026-08-28
+- 기준 문서: `docs/design.md` v3.1
+- 운영 계약: `docs/design-changes/TaxiTaShare_design_system_operations_foundations_v1.md` Foundations v1
+- 갱신일: 2026-08-30
 - 제품 요구사항 기준: `docs/prd.md`
 - 관련 요구사항: `FR-01~05`, `FR-10~22`, `FR-30~40`, `FR-50~55`, 접근성·위치정보·신뢰성 비기능 요구사항
 
@@ -38,13 +39,15 @@
 
 ## 3. 작업 순서
 
-### Design 0 — Token Reset
+### Design 0 — Foundations & Token Reset
 
-대상: `app/globals.css`, theme variables, Tailwind 토큰. Premium palette, typography, radius, focus ring을 정의하고 blue/yellow/mint legacy 토큰과 기본 card shadow를 정리한다.
+대상: `docs/design.md`, `docs/design-changes/TaxiTaShare_design_system_operations_foundations_v1.md`, `app/globals.css`, theme variables, Tailwind 토큰. Premium palette, typography, radius, focus ring을 정의하고 raw value와 semantic role의 대응을 문서화한다. blue/yellow/mint legacy 토큰과 기본 card shadow는 제거 일정이 확정된 alias만 남긴다.
 
 ### Design 1 — Base Components
 
-대상: Button, Card, Input, StatusBadge, TopBar, BottomNavigation. CTA 14px radius, selected/dark/brand-soft/semantic variant, navigation의 focus 상태를 통일한다.
+대상: Button, Card, Input, StatusBadge, TopBar, BottomNavigation. CTA 14px radius, selected/dark/brand-soft/semantic variant, navigation의 focus 상태를 통일한다. 페이지 안에 중복된 버튼·카드 문법은 공통 variant로 흡수하며, 새 variant는 운영 계약의 변경 절차를 따른다.
+
+`StatusBadge`의 기존 `tone="mint|info|warn|muted"` 호출은 화면별 전환 동안 호환을 위해 유지한다. Design 2~5에서 각 호출을 `variant="neutral|brand|success|warning|danger"`로 옮기고, 마지막 호출이 제거된 뒤에만 legacy alias를 삭제한다. 신규 화면과 신규 호출에는 `tone`을 사용하지 않는다.
 
 ### Design 2 — Home & Room Cards
 
@@ -60,7 +63,7 @@
 
 ### Design 5 — Admin & Regression
 
-대상: `/admin`, 전체 화면. 관리자 navigation 분리, 반응형·접근성 회귀, deprecated 토큰 제거를 수행한다.
+대상: `/admin`, 전체 화면. 관리자 navigation 분리, 반응형·접근성 회귀, deprecated 토큰 제거를 수행한다. 에셋 출처·라이선스·placeholder 잔존 여부와 390/430/834/1280px 시각 회귀를 함께 점검한다.
 
 각 단계는 기능 로직 변경 없이 독립적으로 검증·배포 가능해야 한다.
 
@@ -81,6 +84,8 @@ pnpm build
 - 정산 결과가 일반 화면과 구분되고 상태를 색상 없이도 이해할 수 있다.
 - 200% 확대, `prefers-reduced-motion`, 지도 loading/error/no-route에서도 정보와 CTA의 의미가 유지된다.
 - 모바일과 데스크톱이 단순 확대가 아니며 기능·DB·권한·포인트 원장 흐름은 바뀌지 않는다.
+- 각 변경은 `docs/design-changes/TaxiTaShare_design_system_operations_foundations_v1.md`의 token, component, pattern, asset, content, governance 체크리스트를 충족한다.
+- 화면 전환은 loading, empty, error, disabled, success, retry 상태를 같은 패턴으로 확인한다.
 
 ## 5. 유지 규칙과 열린 결정
 

@@ -10,6 +10,7 @@ import {
 import { MobileShell } from '@/components/mobile-shell'
 import { TopBar } from '@/components/top-bar'
 import { AdminDashboardVisuals } from '@/components/admin/admin-dashboard-visuals'
+import { StatusBadge } from '@/components/status-badge'
 import { Card } from '@/components/ui/card'
 import { requireAdmin } from '@/lib/auth/session'
 import {
@@ -54,15 +55,18 @@ export default async function AdminDashboardPage() {
   return (
     <MobileShell withTabBar={false}>
       <TopBar title="관리자 운영 대시보드" backHref="/home" />
-      <main className="grid flex-1 gap-6 px-5 py-5 lg:grid-cols-[minmax(0,7fr)_minmax(22rem,5fr)] lg:items-start">
+      <main className="grid flex-1 gap-6 px-4 py-5 sm:px-5 lg:grid-cols-[minmax(0,7fr)_minmax(22rem,5fr)] lg:items-start">
         <div className="flex min-w-0 flex-col gap-6">
-          <Card className="flex items-center gap-3 border-primary/30 bg-primary/5 p-4 lg:min-h-36">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
+          <Card variant="subtle" className="flex items-center gap-3 p-4 lg:min-h-36">
+            <div className="flex size-10 items-center justify-center rounded-[14px] bg-brand-soft text-primary">
               <ShieldCheck className="size-5" aria-hidden />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">현재 관리자</p>
-              <p className="font-bold">{admin.name}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-muted-foreground">현재 관리자</p>
+                <StatusBadge variant="brand" label="관리자 세션" />
+              </div>
+              <p className="mt-1 font-semibold">{admin.name}</p>
             </div>
           </Card>
 
@@ -82,7 +86,7 @@ export default async function AdminDashboardPage() {
                 label="포인트 지급 요청"
                 description="처리 대기 중인 지급 요청"
                 count={operations.queues.pointRequests}
-                tone="warn"
+                tone="warning"
               />
               <QueueLink
                 href="/admin/settlements"
@@ -90,7 +94,7 @@ export default async function AdminDashboardPage() {
                 label="실제 요금 이의"
                 description="관리자 검토가 필요한 정산"
                 count={operations.queues.openDisputes}
-                tone="warn"
+                tone="warning"
               />
               <QueueLink
                 href="/admin/reports"
@@ -102,7 +106,7 @@ export default async function AdminDashboardPage() {
                     : '현황을 불러오지 못했습니다. 목록에서 다시 확인하세요.'
                 }
                 count={safetyQueueCount}
-                tone="warn"
+                tone="warning"
               />
             </div>
           </section>
@@ -123,7 +127,7 @@ export default async function AdminDashboardPage() {
                 label="정산 확인 대기"
                 description="참여자 확인이 진행 중인 정산"
                 count={operations.queues.pendingSettlements}
-                tone="info"
+                tone="brand"
               />
               <QueueLink
                 href="/admin/operations"
@@ -131,7 +135,7 @@ export default async function AdminDashboardPage() {
                 label="운영 중인 모집"
                 description="모집부터 이동 중까지의 현황"
                 count={operatingTrips}
-                tone="info"
+                tone="brand"
               />
             </div>
           </section>
@@ -145,9 +149,12 @@ export default async function AdminDashboardPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {tripStatuses.map(({ status, label, count: statusCount }) => (
-                <Card key={status} className="p-4">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="mt-1 text-2xl font-bold">{statusCount}건</p>
+                <Card key={status} variant="surface" className="p-4">
+                  <StatusBadge
+                    variant={status === 'IN_PROGRESS' ? 'brand' : 'neutral'}
+                    label={`${label} · ${status}`}
+                  />
+                  <p className="numeric mt-3 text-2xl font-semibold">{statusCount}건</p>
                 </Card>
               ))}
             </div>
@@ -175,25 +182,30 @@ function QueueLink({
   label: string
   description: string
   count: number | null
-  tone: 'warn' | 'info'
+  tone: 'warning' | 'brand'
 }) {
-  const iconClassName = tone === 'warn' ? 'text-warn' : 'text-info'
-  const cardClassName =
-    tone === 'warn'
-      ? 'border-warn/30 bg-warn-soft/50 hover:bg-warn-soft'
-      : 'border-info/30 bg-info-soft/50 hover:bg-info-soft'
+  const isActionRequired = tone === 'warning'
 
   return (
     <Link
       href={href}
-      className="rounded-[18px] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="block h-full rounded-[18px] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <Card className={`flex h-full items-center gap-3 p-4 transition-colors ${cardClassName}`}>
-        <Icon className={`size-5 shrink-0 ${iconClassName}`} aria-hidden />
+      <Card variant="interactive" className="flex h-full items-center gap-3 p-4">
+        <Icon
+          className={`size-5 shrink-0 ${isActionRequired ? 'text-warning' : 'text-brand'}`}
+          aria-hidden
+        />
         <div className="min-w-0">
-          <p className="font-bold">{label}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold">{label}</p>
+            <StatusBadge
+              variant={tone}
+              label={isActionRequired ? '조치 필요' : '운영 현황'}
+            />
+          </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-          <p className="mt-2 text-sm font-bold">
+          <p className="numeric mt-2 text-sm font-semibold">
             {count === null ? '확인 필요' : `${Number(count)}건`}
           </p>
         </div>

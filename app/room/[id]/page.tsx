@@ -30,6 +30,7 @@ import { StatusBadge } from '@/components/status-badge'
 import { TopBar } from '@/components/top-bar'
 import { RouteMap } from '@/components/route-map'
 import { Card, CardTitle } from '@/components/ui/card'
+import { buttonVariants } from '@/components/ui/button'
 import { requireCompleteUser } from '@/lib/auth/session'
 import { getCoreDashboard } from '@/lib/core/service'
 
@@ -99,35 +100,36 @@ export default async function RoomDetailPage({
     <MobileShell withTabBar={false}>
       <TopBar title="동승 방 상세" subtitle={`방장 ${maskName(room.hostName)}`} backHref="/my-rooms" />
 
-      <main className="flex flex-1 flex-col gap-4 px-5 py-4 pb-28">
+      <main className="flex flex-1 flex-col gap-5 px-4 py-5 pb-36 min-[391px]:px-5 lg:mx-auto lg:w-full lg:max-w-6xl lg:px-8">
         {query.message ? (
-          <p className="rounded-xl bg-mint-soft px-4 py-3 text-sm" role="status">
+          <p className="rounded-[14px] border border-success/20 bg-success-soft px-4 py-3 text-sm text-success" role="status">
             {query.message}
           </p>
         ) : null}
         {query.error ? (
-          <p className="rounded-xl bg-warn-soft px-4 py-3 text-sm" role="alert">
+          <p className="rounded-[14px] border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning" role="alert">
             {query.error}
           </p>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={room.status === 'OPEN' ? 'mint' : 'muted'}>
+        <div className="flex flex-wrap items-center gap-2" aria-label="모집 상태">
+          <StatusBadge variant={room.status === 'OPEN' ? 'success' : 'neutral'}>
             {roomStatusLabel(room.status)}
           </StatusBadge>
-          <StatusBadge tone={isAtCapacity ? 'muted' : 'brand'} icon={UsersRound}>
+          <StatusBadge variant={isAtCapacity ? 'neutral' : 'brand'} icon={UsersRound}>
             확정 {room.approvedCount}/{room.maxParticipants}명
           </StatusBadge>
           {room.approvedCount >= 2 ? (
-            <StatusBadge tone="info" icon={ShieldCheck}>
+            <StatusBadge variant="brand" icon={ShieldCheck}>
               최소 출발 인원 충족
             </StatusBadge>
           ) : (
-            <StatusBadge tone="warn">출발까지 {2 - room.approvedCount}명 필요</StatusBadge>
+            <StatusBadge variant="warning">출발까지 {2 - room.approvedCount}명 필요</StatusBadge>
           )}
         </div>
 
-        <Card className="gap-3">
+        <section className="grid gap-4 lg:grid-cols-2 lg:items-start" aria-label="이동 경로와 예상 요금">
+        <Card className="flex flex-col gap-3">
           <CardTitle>이동 정보</CardTitle>
           <InfoLine icon={MapPin} label="출발" value={room.origin} />
           <InfoLine icon={MapPin} label="도착" value={room.destination} />
@@ -143,6 +145,7 @@ export default async function RoomDetailPage({
         room.destinationLatitude !== null &&
         room.destinationLongitude !== null ? (
           <RouteMap
+            className="lg:min-h-[30rem]"
             origin={{
               latitude: room.originLatitude,
               longitude: room.originLongitude,
@@ -155,7 +158,7 @@ export default async function RoomDetailPage({
         ) : null}
 
         {room.hostMemo ? (
-          <Card className="gap-3">
+          <Card className="flex flex-col gap-3">
             <CardTitle>방장 전달사항</CardTitle>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
               {room.hostMemo}
@@ -163,7 +166,7 @@ export default async function RoomDetailPage({
           </Card>
         ) : null}
 
-        <Card className="gap-3">
+        <Card className="flex flex-col gap-3 lg:sticky lg:top-20">
           <CardTitle>예상 분담금</CardTitle>
           <dl className="flex flex-col gap-3 text-sm">
             <div className="flex items-center justify-between gap-4">
@@ -192,6 +195,7 @@ export default async function RoomDetailPage({
             </p>
           )}
         </Card>
+        </section>
 
         {isHost && room.status === 'OPEN' ? (
           <Card className="gap-3">
@@ -262,12 +266,12 @@ export default async function RoomDetailPage({
                     {isHost ? participant.name : maskName(participant.name)}
                   </span>
                   <StatusBadge
-                    tone={
+                    variant={
                       participant.userId === room.fareSubmitterUserId
-                        ? 'info'
+                        ? 'brand'
                         : participant.role === 'HOST'
                           ? 'brand'
-                          : 'muted'
+                          : 'neutral'
                     }
                   >
                     {participant.userId === room.fareSubmitterUserId
@@ -485,7 +489,7 @@ export default async function RoomDetailPage({
           />
           <Link
             href={`/room/${room.tripId}/gathering`}
-            className="flex min-h-12 items-center justify-center rounded-full border border-border bg-background px-6 py-3 text-[17px]"
+            className={buttonVariants({ variant: 'secondary', size: 'lg' })}
           >
             집결·노쇼 관리
           </Link>
@@ -498,7 +502,7 @@ export default async function RoomDetailPage({
                 ? `/room/${room.tripId}/settle/complete`
                 : `/room/${room.tripId}/gathering`
             }
-            className="flex min-h-12 items-center justify-center rounded-full bg-primary px-6 py-3 text-[17px] text-primary-foreground"
+            className={buttonVariants({ variant: 'primary', size: 'lg' })}
           >
             {room.status === 'COMPLETED' ? '정산 결과 보기' : '집결·이동 화면'}
           </Link>
@@ -553,7 +557,7 @@ function InfoLine({
     <div className="flex items-start gap-3 text-sm">
       <Icon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
       <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
-      <span className="font-semibold">{value}</span>
+      <span className="min-w-0 break-words font-semibold leading-5">{value}</span>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import {
 } from '@/app/core/actions'
 import { MobileShell } from '@/components/mobile-shell'
 import { PendingSubmitButton } from '@/components/pending-submit-button'
+import { StatusBadge } from '@/components/status-badge'
 import { TopBar } from '@/components/top-bar'
 import { Card } from '@/components/ui/card'
 import { getAdminPointDashboard } from '@/lib/core/service'
@@ -38,11 +39,11 @@ export default async function AdminPage({
   return (
     <MobileShell>
       <TopBar title="관리자 · 포인트 지급" backHref="/home" />
-      <main className="flex-1 overflow-y-auto px-5 pb-10 pt-4">
+      <main className="mx-auto flex w-full max-w-[960px] flex-1 flex-col overflow-y-auto px-4 pb-10 pt-4 sm:px-5">
         {message ? (
           <p
             role="status"
-            className="mb-4 rounded-xl bg-mint-soft px-4 py-3 text-sm font-semibold text-foreground"
+            className="mb-4 rounded-[14px] border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-foreground"
           >
             {message}
           </p>
@@ -50,31 +51,37 @@ export default async function AdminPage({
         {error ? (
           <p
             role="alert"
-            className="mb-4 rounded-xl bg-warn-soft px-4 py-3 text-sm font-semibold text-foreground"
+            className="mb-4 rounded-[14px] border border-warning/20 bg-warning-soft px-4 py-3 text-sm font-semibold text-foreground"
           >
             {error}
           </p>
         ) : null}
 
-        <Card className="mb-5 flex items-center gap-3 border-primary/30 bg-primary/5 p-4">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
+        <Card variant="subtle" className="mb-5 flex items-center gap-3 p-4">
+          <div className="flex size-10 items-center justify-center rounded-[14px] bg-brand-soft text-primary">
             <ShieldCheck className="size-5" aria-hidden />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">누적 지급 포인트</p>
-            <p className="text-lg font-bold text-foreground">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-muted-foreground">누적 지급 포인트</p>
+              <StatusBadge variant="brand" label="관리자 지급 전용" />
+            </div>
+            <p className="numeric mt-1 text-lg font-semibold text-foreground">
               {formatPoints(data.totalGranted)}
             </p>
           </div>
         </Card>
 
         <form action={grantPointsAction}>
-          <Card className="mb-7 flex flex-col gap-4 p-5">
-            <h2 className="text-sm font-bold">직접 지급 실행 요청</h2>
+          <Card variant="selected" className="mb-7 flex flex-col gap-4 p-5" aria-labelledby="direct-grant-heading">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="direct-grant-heading" className="text-base font-semibold">직접 지급 실행 요청</h2>
+              <StatusBadge variant="warning" label="1단계 · 실행 기안" />
+            </div>
             <p className="text-xs text-muted-foreground">
-              다른 활성 관리자의 승인 후, 기안한 관리자가 원장 지급을 실행합니다.
+              기안 관리자 {admin.name}이 요청을 만들면, 다른 활성 관리자의 독립 승인 후 기안한 관리자가 원장 지급을 실행합니다.
             </p>
-            <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-5 text-foreground">
+            <p className="rounded-[14px] border border-warning/20 bg-warning-soft px-3 py-2 text-xs leading-5 text-foreground">
               이용 정지된 대상은 정산 채무 상환 전용으로만 표시됩니다. 상환
               지원은 현재 남아 있는 정산 채무와 정확히 같은 금액으로만 가능하며,
               포인트 지급만으로 이용 정지가 해제되지는 않습니다.
@@ -165,7 +172,7 @@ export default async function AdminPage({
             </div>
             <PendingSubmitButton
               pendingLabel="지급 실행 요청을 만드는 중…"
-              className="h-12 w-full gap-2 rounded-xl text-base font-semibold"
+              className="h-12 w-full gap-2 text-base font-semibold"
             >
               <Gift className="size-5" aria-hidden />
               지급 실행 요청 만들기
@@ -185,20 +192,26 @@ export default async function AdminPage({
           {data.unpreparedRequests.length ? (
             <div className="flex flex-col gap-3">
               {data.unpreparedRequests.map((request) => (
-                <Card key={request.requestId} className="p-4">
-                  <p className="text-sm font-semibold">
-                    {request.name} · {request.studentId}
-                  </p>
+                <Card key={request.requestId} variant="surface" className="p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold">
+                      {request.name} · {request.studentId}
+                    </p>
+                    <StatusBadge variant="neutral" label="1단계 · 기안 대기" />
+                  </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {request.reason}
                   </p>
-                  <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    요청자 {request.name} · 요청 {formatDate(request.requestedAt)}
+                  </p>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-extrabold text-primary">
-                        {formatPoints(request.requestedAmount)}
+                      <p className="numeric font-semibold text-ink">
+                        +{formatPoints(request.requestedAmount)}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDate(request.requestedAt)}
+                        실행 기안 전 · 원장 미기록
                       </p>
                     </div>
                     <form action={preparePointRequestFulfillmentAction}>
@@ -225,7 +238,7 @@ export default async function AdminPage({
               ))}
             </div>
           ) : (
-            <Card className="p-4 text-sm text-muted-foreground">
+            <Card variant="subtle" className="p-4 text-sm text-muted-foreground">
               실행 기안 대기 중인 사용자 요청이 없습니다.
             </Card>
           )}
@@ -243,20 +256,26 @@ export default async function AdminPage({
           {data.approvalQueue.length ? (
             <div className="flex flex-col gap-3">
               {data.approvalQueue.map((request) => (
-                <Card key={request.executionRequestId} className="p-4">
-                  <p className="text-sm font-semibold">
-                    {request.targetName} · {maskStudentId(request.targetStudentId)}
-                  </p>
+                <Card key={request.executionRequestId} variant="surface" className="p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold">
+                      {request.targetName} · {maskStudentId(request.targetStudentId)}
+                    </p>
+                    <StatusBadge variant="warning" label="2단계 · 독립 승인 대기" />
+                  </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     기안 관리자 {request.requestedByName} · {request.reason}
                   </p>
-                  <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    기안 {formatDate(request.createdAt)} · 원장 미기록
+                  </p>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-extrabold text-primary">
-                        {formatPoints(request.amount)}
+                      <p className="numeric font-semibold text-ink">
+                        +{formatPoints(request.amount)}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDate(request.createdAt)}
+                        다른 활성 관리자의 승인 필요
                       </p>
                     </div>
                     <form action={approvePointGrantExecutionAction}>
@@ -275,7 +294,7 @@ export default async function AdminPage({
               ))}
             </div>
           ) : (
-            <Card className="p-4 text-sm text-muted-foreground">
+            <Card variant="subtle" className="p-4 text-sm text-muted-foreground">
               독립 승인을 기다리는 지급 실행 요청이 없습니다.
             </Card>
           )}
@@ -293,20 +312,26 @@ export default async function AdminPage({
           {data.executionQueue.length ? (
             <div className="flex flex-col gap-3">
               {data.executionQueue.map((request) => (
-                <Card key={request.executionRequestId} className="p-4">
-                  <p className="text-sm font-semibold">
-                    {request.targetName} · {maskStudentId(request.targetStudentId)}
-                  </p>
+                <Card key={request.executionRequestId} variant="surface" className="border-warning p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold">
+                      {request.targetName} · {maskStudentId(request.targetStudentId)}
+                    </p>
+                    <StatusBadge variant="warning" label="3단계 · 원장 실행 가능" />
+                  </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     승인 관리자 {request.approverName} · {request.reason}
                   </p>
-                  <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    승인 {formatDate(request.approvedAt)} · 실행 예정 관리자 {admin.name}
+                  </p>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-extrabold text-primary">
-                        {formatPoints(request.amount)}
+                      <p className="numeric font-semibold text-ink">
+                        +{formatPoints(request.amount)}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        승인 {formatDate(request.approvedAt)}
+                      <p className="text-xs text-warning">
+                        원장에 실제 지급을 기록하는 단계
                       </p>
                     </div>
                     <form action={executePointGrantExecutionAction}>
@@ -324,7 +349,7 @@ export default async function AdminPage({
               ))}
             </div>
           ) : (
-            <Card className="p-4 text-sm text-muted-foreground">
+            <Card variant="subtle" className="p-4 text-sm text-muted-foreground">
               내가 실행할 승인 완료 지급이 없습니다.
             </Card>
           )}
@@ -343,6 +368,7 @@ export default async function AdminPage({
             {data.grants.map((grant) => (
               <Card
                 key={grant.ledgerId}
+                variant="surface"
                 className="flex items-center justify-between gap-3 p-4"
               >
                 <div className="min-w-0">
@@ -358,7 +384,7 @@ export default async function AdminPage({
                     {' · '}{formatDate(grant.createdAt)}
                   </p>
                 </div>
-                <span className="shrink-0 text-sm font-bold text-mint">
+                <span className="numeric shrink-0 text-sm font-semibold text-success">
                   +{formatPoints(grant.amount)}
                 </span>
               </Card>

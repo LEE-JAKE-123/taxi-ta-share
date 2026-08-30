@@ -51,21 +51,21 @@ export default async function GatheringPage({
 
       <main className="flex flex-1 flex-col gap-4 px-5 py-4 pb-32">
         {query.message ? (
-          <p className="rounded-xl bg-mint-soft px-4 py-3 text-sm" role="status">
+          <p className="rounded-[14px] bg-success-soft px-4 py-3 text-sm text-success" role="status">
             {query.message}
           </p>
         ) : null}
         {query.error ? (
-          <p className="rounded-xl bg-warn-soft px-4 py-3 text-sm" role="alert">
+          <p className="rounded-[14px] bg-warning-soft px-4 py-3 text-sm text-warning" role="alert">
             {query.error}
           </p>
         ) : null}
 
-        <Card className="gap-3 bg-foreground text-background">
+        <Card variant="dark" className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs text-background/70">현재 이동 상태</p>
-              <h1 className="mt-1 text-xl font-extrabold">
+              <p className="text-xs font-medium text-white/70">현재 이동 상태</p>
+              <h1 className="mt-1 text-xl font-bold">
                 {trip.status === 'CONFIRMED'
                   ? '출발 준비'
                   : trip.status === 'IN_PROGRESS'
@@ -75,17 +75,20 @@ export default async function GatheringPage({
                       : '이용 완료'}
               </h1>
             </div>
-            <StatusBadge tone="brand">
+            <StatusBadge variant="brand" kind="emphasis">
               확정 {trip.escrowParticipantCount}명
             </StatusBadge>
           </div>
-          <p className="flex items-start gap-2 text-sm text-background/80">
+          <div className="border-t border-white/10 pt-3">
+            <p className="flex items-start gap-2 text-sm text-white/80">
             <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden />
             저장된 출발지 {trip.origin}에서 집결합니다.
-          </p>
+            </p>
+            <p className="mt-2 text-xs text-white/70">출발 시각 · {formatDepartureTime(trip.departureAt)}</p>
+          </div>
         </Card>
 
-        <Card className="gap-3">
+        <Card variant="surface" className="flex flex-col gap-3">
           <CardTitle>확정 참여자</CardTitle>
           <p className="text-xs text-muted-foreground">
             노쇼도 예치 당시 확정 인원에 포함되어 동일한 최종 분담액을 부담합니다.
@@ -94,7 +97,7 @@ export default async function GatheringPage({
             {participants.map((participant, index) => (
               <li
                 key={participant.userId}
-                className="flex flex-wrap items-center gap-3 rounded-xl bg-muted/60 p-3"
+                className="flex flex-wrap items-center gap-3 rounded-[14px] bg-surface-subtle p-3"
               >
                 <Avatar name={participant.name} index={index} size="sm" />
                 <div className="min-w-0 flex-1">
@@ -103,7 +106,7 @@ export default async function GatheringPage({
                     {participant.userId === user.userId ? ' (나)' : ''}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    예치 {Number(participant.depositAmount).toLocaleString('ko-KR')}P
+                    예치금 {Number(participant.depositAmount).toLocaleString('ko-KR')}P
                   </p>
                 </div>
                 <ParticipantBadge status={participant.status} />
@@ -123,6 +126,9 @@ export default async function GatheringPage({
                       name="idempotencyKey"
                       value={randomUUID()}
                     />
+                    <p className="mb-2 text-xs leading-relaxed text-warning">
+                      신고 접수는 운영 검토를 시작하며, 참여·예치·정산 상태를 즉시 변경하지 않습니다.
+                    </p>
                     <label className="mb-2 block text-xs font-semibold text-muted-foreground">
                       신고 사유
                       <textarea
@@ -159,7 +165,7 @@ export default async function GatheringPage({
         </Card>
 
         {incidents.length ? (
-          <Card className="gap-3">
+          <Card variant="surface" className="flex flex-col gap-3">
             <CardTitle>이동 사건 진행 상황</CardTitle>
             <p className="text-xs text-muted-foreground">
               사건 접수와 반박·운영 검토는 사실관계 기록용입니다. 이 화면에서 포인트·예치금·정산·참여 상태는 변경되지 않습니다.
@@ -171,7 +177,7 @@ export default async function GatheringPage({
                   'NOT_ESTABLISHED',
                 ].includes(incident.commandType ?? '')
                 return (
-                  <li key={incident.incidentId} className="rounded-xl bg-muted/60 p-3">
+                  <li key={incident.incidentId} className="rounded-[14px] bg-surface-subtle p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold">
@@ -183,7 +189,7 @@ export default async function GatheringPage({
                           {incident.viewerRole === 'REPORTED' ? '대상자로 접수됨' : '내가 접수함'} · {incidentStatusLabel(incident.commandType)}
                         </p>
                       </div>
-                      <StatusBadge tone={terminal ? 'muted' : 'warn'}>
+                      <StatusBadge variant={terminal ? 'neutral' : 'warning'}>
                         {incidentStatusLabel(incident.commandType)}
                       </StatusBadge>
                     </div>
@@ -265,7 +271,7 @@ export default async function GatheringPage({
           </form>
         ) : null}
         {canReportHostNoStart ? (
-          <form action={reportHostNoStartAction} className="rounded-xl border border-destructive/30 bg-warn-soft p-3">
+          <form action={reportHostNoStartAction} className="rounded-[14px] border border-danger/30 bg-warning-soft p-3">
             <input type="hidden" name="tripId" value={trip.tripId} />
             <input type="hidden" name="hostId" value={trip.hostUserId} />
             <input
@@ -273,6 +279,9 @@ export default async function GatheringPage({
               name="idempotencyKey"
               value={randomUUID()}
             />
+            <p className="mb-2 text-xs leading-relaxed text-warning">
+              신고 접수는 운영 검토를 시작하며, 참여·예치·정산 상태를 즉시 변경하지 않습니다.
+            </p>
             <label className="mb-2 block text-xs font-semibold">
               방장 미출발 신고 사유
               <textarea
@@ -328,7 +337,7 @@ export default async function GatheringPage({
                   ? `/room/${trip.tripId}`
                   : `/room/${trip.tripId}/settle`
             }
-            className="flex min-h-12 items-center justify-center rounded-full border border-border bg-background px-6 py-3 text-[17px]"
+            className="flex min-h-12 items-center justify-center rounded-[14px] border border-hairline bg-surface px-6 py-3 text-base font-semibold text-ink"
           >
             {trip.status === 'IN_PROGRESS' ? '방 상세에서 도착 처리' : '정산 현황 보기'}
           </Link>
@@ -347,26 +356,34 @@ async function getJourney(userId: string, tripId: string) {
   }
 }
 
+function formatDepartureTime(value: string) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(value))
+}
+
 function ParticipantBadge({ status }: { status: string }) {
   if (status === 'CHECKED_IN') {
     return (
-      <StatusBadge tone="mint" icon={Check}>
+      <StatusBadge variant="success" icon={Check}>
         체크인
       </StatusBadge>
     )
   }
   if (status === 'NO_SHOW') {
     return (
-      <StatusBadge tone="warn" icon={UserX}>
+      <StatusBadge variant="warning" icon={UserX}>
         노쇼
       </StatusBadge>
     )
   }
   if (status === 'COMPLETED') {
-    return <StatusBadge tone="mint">정산 완료</StatusBadge>
+    return <StatusBadge variant="success">정산 완료</StatusBadge>
   }
   return (
-    <StatusBadge tone="muted" icon={Clock}>
+    <StatusBadge variant="neutral" icon={Clock}>
       대기 중
     </StatusBadge>
   )

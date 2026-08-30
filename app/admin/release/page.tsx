@@ -1,5 +1,6 @@
 import { AdminReadPage } from '@/components/admin/admin-read-page'
 import { Card } from '@/components/ui/card'
+import { StatusBadge } from '@/components/status-badge'
 
 const checks = [
   ['운영 환경 식별', process.env.APP_ENVIRONMENT === 'production'],
@@ -16,11 +17,13 @@ export default function AdminReleasePage() {
       description="비밀값 자체는 표시하지 않고 현재 배포에 설정됐는지만 확인합니다."
     >
       {checks.map(([label, ready]) => (
-        <Card key={label} className="flex items-center justify-between p-4">
-          <span className="font-semibold">{label}</span>
-          <span className="text-sm font-bold">
-            {ready ? '설정됨' : '확인 필요'}
-          </span>
+        <Card key={label} className="flex items-center justify-between gap-4 p-5">
+          <span className="font-semibold text-ink">{label}</span>
+          <StatusBadge
+            variant={ready ? 'success' : 'warning'}
+            label={ready ? '설정됨' : '확인 필요'}
+            helper={ready ? '구성 값 감지' : '구성 값 미감지'}
+          />
         </Card>
       ))}
     </AdminReadPage>

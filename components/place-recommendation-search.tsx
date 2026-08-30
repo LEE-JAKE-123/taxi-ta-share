@@ -12,8 +12,10 @@ import {
   Users,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
 import { formatDeparture, maskName } from '@/components/database-room-card'
+import { cn } from '@/lib/utils'
 import type { PlaceRecommendation } from '@/lib/recommendations/place-search'
 import type { SelectablePlaceResult } from '@/lib/routing/types'
 
@@ -110,29 +112,31 @@ export function PlaceRecommendationSearch() {
           }}
         />
         {!origin || !destination ? (
-          <p className="rounded-xl bg-primary/10 p-3 text-sm" role="status">
+          <Card variant="subtle" className="p-4 text-sm" role="status">
             검색 후 표시되는 결과에서 출발지와 목적지를 각각 선택해 주세요.
             두 장소가 모두 <strong>선택됨</strong> 상태가 되면 추천이 자동으로
             시작됩니다.
-          </p>
+          </Card>
         ) : null}
         {loading ? (
-          <p className="rounded-xl bg-muted p-3 text-sm" role="status">
+          <Card variant="subtle" className="p-4 text-sm" role="status">
             거리와 경로 유사도를 계산하는 중...
-          </p>
+          </Card>
         ) : null}
         {message ? (
-          <div className="rounded-xl bg-warn-soft p-3 text-sm" role="alert">
+          <Card variant="subtle" className="border border-warning/20 bg-warning-soft p-4 text-sm" role="alert">
             <p>{message}</p>
-            <button
+            <Button
               type="button"
               onClick={retryRecommendations}
               disabled={!origin || !destination || loading}
-              className="mt-2 min-h-10 rounded-lg border border-border bg-background px-3 font-semibold disabled:opacity-50"
+              variant="secondary"
+              size="sm"
+              className="mt-3"
             >
               다시 시도
-            </button>
-          </div>
+            </Button>
+          </Card>
         ) : null}
       </Card>
 
@@ -149,7 +153,7 @@ export function PlaceRecommendationSearch() {
           <p className="font-semibold">현재 함께 탑승 가능한 방이 없습니다.</p>
           <Link
             href="/create"
-            className="mt-4 inline-flex min-h-11 items-center justify-center rounded-full bg-primary px-5 py-3 text-sm text-primary-foreground"
+            className={cn(buttonVariants({ variant: 'primary', size: 'default' }), 'mt-4')}
           >
             새로운 방 만들기
           </Link>
@@ -211,7 +215,7 @@ function PlacePicker({
           id={`${label}-query`}
           value={query}
           maxLength={100}
-          className="app-input"
+          className="app-input app-input-search"
           placeholder={`${label} 검색`}
           onChange={(event) => {
             setQuery(event.target.value)
@@ -224,15 +228,15 @@ function PlacePicker({
             }
           }}
         />
-        <button
+        <Button
           type="button"
           aria-label={`${label} 검색`}
           disabled={searching || !query.trim()}
           onClick={() => void search()}
-          className="min-h-11 rounded-full bg-primary px-5 text-primary-foreground disabled:opacity-50"
+          size="icon-sm"
         >
           <Search className="size-4" aria-hidden />
-        </button>
+        </Button>
       </div>
       {results.length ? (
         <div className="mt-2 rounded-xl border bg-card p-2">
@@ -280,10 +284,10 @@ function RecommendationResult({ item }: { item: PlaceRecommendation }) {
   return (
     <Card className="flex flex-col gap-3 border-primary/40">
       <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge tone="brand" icon={Sparkles}>
+        <StatusBadge variant="brand" icon={Sparkles}>
           추천 점수 {item.score}
         </StatusBadge>
-        <StatusBadge tone="info" icon={Users}>
+        <StatusBadge variant="brand" icon={Users}>
           {item.approvedCount}/{item.maxParticipants}명
         </StatusBadge>
       </div>
@@ -331,7 +335,7 @@ function RecommendationResult({ item }: { item: PlaceRecommendation }) {
       </dl>
       <Link
         href={`/room/${item.tripId}`}
-        className="flex min-h-11 items-center justify-center rounded-full bg-foreground px-5 py-3 text-sm font-semibold text-background"
+        className={buttonVariants({ variant: 'dark', size: 'default' })}
       >
         상세 확인 후 참여 신청
       </Link>

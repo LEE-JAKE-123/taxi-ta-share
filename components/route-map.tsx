@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Coordinates, RouteGeometry } from '@/lib/routing/types'
 
@@ -9,6 +10,10 @@ type KakaoOverlay = { setMap(map: KakaoMap | null): void }
 
 type KakaoMaps = {
   load(callback: () => void): void
+  event: {
+    addListener(target: unknown, type: string, handler: () => void): void
+    removeListener(target: unknown, type: string, handler: () => void): void
+  }
   LatLng: new (latitude: number, longitude: number) => unknown
   Map: new (container: HTMLElement, options: object) => KakaoMap
   Marker: new (options: object) => KakaoOverlay
@@ -50,6 +55,7 @@ export function RouteMap({
   const [error, setError] = useState<string>()
   const [loaded, setLoaded] = useState(false)
   const [retryNonce, setRetryNonce] = useState(0)
+  const [viewportResetScheduled, setViewportResetScheduled] = useState(false)
   const key = process.env.NEXT_PUBLIC_KAKAO_MAP_JS_KEY
   const visibleError = key
     ? error
@@ -60,6 +66,17 @@ export function RouteMap({
 
     let cancelled = false
     const overlays: KakaoOverlay[] = []
+    let viewportResetTimer: number | null = null
+    let viewportResetGuardTimer: number | null = null
+    let removeViewportListeners: (() => void) | null = null
+
+    const clearViewportReset = () => {
+      if (viewportResetTimer) window.clearTimeout(viewportResetTimer)
+      if (viewportResetGuardTimer) window.clearTimeout(viewportResetGuardTimer)
+      viewportResetTimer = null
+      viewportResetGuardTimer = null
+      setViewportResetScheduled(false)
+    }
 
     const initialize = () => {
       const maps = window.kakao?.maps
@@ -93,6 +110,25 @@ export function RouteMap({
           bounds.extend(position)
         }
 
+        const canResetViewport = displayPoints.length > 1 || Boolean(geometry?.points.length)
+        let isResettingViewport = false
+        const resetViewport = () => {
+          if (!canResetViewport || cancelled) return
+          viewportResetTimer = null
+          isResettingViewport = true
+          map.setBounds(bounds)
+          setViewportResetScheduled(false)
+          viewportResetGuardTimer = window.setTimeout(() => {
+            isResettingViewport = false
+            viewportResetGuardTimer = null
+          }, 500)
+        }
+        const scheduleViewportReset = () => {
+          if (!canResetViewport || isResettingViewport || cancelled) return
+          if (viewportResetTimer) window.clearTimeout(viewportResetTimer)
+          setViewportResetScheduled(true)
+          viewportResetTimer = window.setTimeout(resetViewport, 5000)
+        }
         if (geometry?.kind === 'LINE_STRING' && geometry.points.length >= 2) {
           const path = geometry.points.map(
             (point) => new maps.LatLng(point.latitude, point.longitude),
@@ -112,7 +148,18 @@ export function RouteMap({
           }
         }
 
-        if (displayPoints.length > 1 || geometry?.points.length) map.setBounds(bounds)
+        if (canResetViewport) map.setBounds(bounds)
+        const viewportEvents = ['drag', 'dragend', 'zoom_start', 'zoom_changed', 'click']
+        if (canResetViewport) {
+          for (const eventName of viewportEvents) {
+            maps.event.addListener(map, eventName, scheduleViewportReset)
+          }
+          removeViewportListeners = () => {
+            for (const eventName of viewportEvents) {
+              maps.event.removeListener(map, eventName, scheduleViewportReset)
+            }
+          }
+        }
         setLoaded(true)
         setError(undefined)
       })
@@ -137,6 +184,8 @@ export function RouteMap({
       }
       return () => {
         cancelled = true
+        clearViewportReset()
+        removeViewportListeners?.()
         for (const overlay of overlays) overlay.setMap(null)
         script.removeEventListener('load', onLoad)
         script.removeEventListener('error', onError)
@@ -145,6 +194,8 @@ export function RouteMap({
 
     return () => {
       cancelled = true
+      clearViewportReset()
+      removeViewportListeners?.()
       for (const overlay of overlays) overlay.setMap(null)
     }
   }, [destination, geometry, key, origin, retryNonce])
@@ -153,6 +204,7 @@ export function RouteMap({
     document.querySelector('script[data-taxi-kakao-map]')?.remove()
     setLoaded(false)
     setError(undefined)
+    setViewportResetScheduled(false)
     setRetryNonce((value) => value + 1)
   }
 
@@ -163,30 +215,40 @@ export function RouteMap({
   ].join(' · ')
 
   return (
-    <div
+    <figure
+      aria-label={`지도: ${markerLegend || '장소 미선택'}${hasRoute ? ' · 예상 이동 경로' : ''}`}
       className={cn(
-        'relative min-h-48 overflow-hidden rounded-[18px] border border-border bg-muted',
+        'relative min-h-60 overflow-hidden rounded-[22px] border border-hairline bg-surface-subtle sm:min-h-72',
         className,
       )}
     >
-      <div ref={container} className="absolute inset-0" aria-label="출발지와 도착지 지도" />
+      <div ref={container} className="absolute inset-0" />
+      <figcaption className="sr-only">
+        {markerLegend || '출발지와 도착지를 선택하면 지도에 표시됩니다.'}
+        {hasRoute ? ' · 예상 이동 경로가 표시됩니다.' : ''}
+      </figcaption>
+      <p className="sr-only" aria-live="polite">
+        {viewportResetScheduled ? '지도 조작이 멈추면 5초 후 전체 경로 보기로 돌아갑니다.' : ''}
+      </p>
       {loaded && (origin || destination) ? (
-        <p className="absolute bottom-2 left-2 rounded-md border border-border bg-background/95 px-2 py-1 text-xs font-semibold text-foreground">
+        <p className="absolute bottom-3 left-3 rounded-[12px] border border-hairline bg-surface/95 px-3 py-2 text-xs font-semibold text-ink">
           {markerLegend}{hasRoute ? ' · 예상 이동 경로' : ''}
         </p>
       ) : null}
       {visibleError ? (
-        <div className="absolute inset-0 grid place-items-center bg-muted p-5 text-center text-sm text-muted-foreground" role="alert">
+        <div className="absolute inset-0 grid place-items-center bg-surface-subtle p-5 text-center text-sm text-muted-foreground" role="alert">
           <div>
             <p>{visibleError}</p>
             {key ? (
-              <button
+              <Button
                 type="button"
                 onClick={retryMapLoad}
-                className="mt-3 min-h-10 rounded-lg border border-border bg-background px-3 font-semibold text-foreground"
+                variant="secondary"
+                size="sm"
+                className="mt-3"
               >
                 다시 시도
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>
@@ -195,10 +257,10 @@ export function RouteMap({
           장소를 선택하면 지도에 표시합니다.
         </p>
       ) : !loaded ? (
-        <p className="absolute inset-0 grid place-items-center bg-muted p-5 text-center text-sm text-muted-foreground" role="status">
+        <p className="absolute inset-0 grid place-items-center bg-surface-subtle p-5 text-center text-sm text-muted-foreground" role="status">
           지도를 불러오는 중…
         </p>
       ) : null}
-    </div>
+    </figure>
   )
 }

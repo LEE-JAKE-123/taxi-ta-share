@@ -45,7 +45,7 @@ export default async function AdminReportsPage({
       <section aria-labelledby="trip-incident-queue-heading" className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <h2 id="trip-incident-queue-heading" className="text-lg font-extrabold">
+            <h2 id="trip-incident-queue-heading" className="text-lg font-semibold tracking-[-0.012em]">
               운행 사고 신고
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -81,7 +81,7 @@ export default async function AdminReportsPage({
                 </div>
               </dl>
 
-              <p className="rounded-xl bg-muted px-3 py-3 text-sm leading-relaxed">
+              <p className="rounded-[14px] border border-hairline bg-surface-subtle px-4 py-3 text-sm leading-relaxed text-ink">
                 {incident.description}
               </p>
               {incident.evidenceRef ? (
@@ -91,7 +91,7 @@ export default async function AdminReportsPage({
               ) : null}
 
               {incident.rebuttalStatement ? (
-                <div className="flex flex-col gap-2 rounded-xl border border-border px-3 py-3">
+                <div className="flex flex-col gap-2 rounded-[14px] border border-hairline bg-surface-subtle px-4 py-3">
                   <p className="text-sm font-semibold">대상자 소명</p>
                   <p className="text-sm leading-relaxed">{incident.rebuttalStatement}</p>
                   {incident.rebuttalEvidenceRef ? (
@@ -103,7 +103,7 @@ export default async function AdminReportsPage({
               ) : null}
 
               {!isTripIncidentTerminal(incident.status ?? 'SUBMITTED') ? (
-                <form action={decideTripIncidentAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                <form action={decideTripIncidentAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                   <input type="hidden" name="incidentId" value={incident.incidentId} />
                   <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                   <label htmlFor={`incident-outcome-${incident.incidentId}`} className="text-sm font-semibold">
@@ -151,7 +151,7 @@ export default async function AdminReportsPage({
                     maxLength={2000}
                     required
                   />
-                  <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                  <p className="rounded-[14px] border border-hairline bg-surface-subtle px-3 py-2 text-xs leading-relaxed text-ink-secondary">
                     {incident.status === 'START_REVIEW' && incident.rebuttalDeadlineAt && !incident.rebuttalDeadlineExpired && !incident.rebuttalStatement
                       ? '반박 기한이 끝나거나 대상자가 반박을 제출하기 전에는 귀책 사실을 확정할 수 없습니다.'
                       : '기록 저장 후에도 포인트 지급·환불·추가 차감이나 계정 제한은 자동으로 발생하지 않습니다.'}
@@ -163,7 +163,7 @@ export default async function AdminReportsPage({
               ) : null}
               {incident.status === 'START_REVIEW' &&
               !incident.rebuttalNotificationId ? (
-                <form action={publishTripIncidentRebuttalWindowAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                <form action={publishTripIncidentRebuttalWindowAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                   <input type="hidden" name="incidentId" value={incident.incidentId} />
                   <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                   <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
@@ -178,7 +178,7 @@ export default async function AdminReportsPage({
               incident.incidentType === 'MEMBER_NO_SHOW' &&
               !incident.noShowExecutionId &&
               incident.reviewAdminId === admin.userId ? (
-                <form action={executeConfirmedMemberNoShowAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                <form action={executeConfirmedMemberNoShowAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                   <input type="hidden" name="incidentId" value={incident.incidentId} />
                   <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                   <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
@@ -201,7 +201,7 @@ export default async function AdminReportsPage({
               incident.incidentType === 'HOST_NO_START' &&
               !incident.noStartRefundExecutionId &&
               incident.reviewAdminId === admin.userId ? (
-                <form action={executeConfirmedHostNoStartRefundAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                <form action={executeConfirmedHostNoStartRefundAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                   <input type="hidden" name="incidentId" value={incident.incidentId} />
                   <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                   <p className="rounded-xl bg-warn-soft px-3 py-2 text-xs leading-relaxed text-warn">
@@ -230,7 +230,7 @@ export default async function AdminReportsPage({
       <section aria-labelledby="report-queue-heading" className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <h2 id="report-queue-heading" className="text-lg font-extrabold">
+            <h2 id="report-queue-heading" className="text-lg font-semibold tracking-[-0.012em]">
               사용자 신고
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -270,7 +270,7 @@ export default async function AdminReportsPage({
                 </div>
               </dl>
 
-              <p className="rounded-xl bg-muted px-3 py-3 text-sm leading-relaxed">
+              <p className="rounded-[14px] border border-hairline bg-surface-subtle px-4 py-3 text-sm leading-relaxed text-ink">
                 {report.description}
               </p>
               {report.evidenceRef ? (
@@ -280,7 +280,7 @@ export default async function AdminReportsPage({
               ) : null}
 
               {!isReportTerminal(report.status) ? (
-                <form action={resolveUserReportAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                <form action={resolveUserReportAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                   <input type="hidden" name="reportId" value={report.reportId} />
                   <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                   <label htmlFor={`report-outcome-${report.reportId}`} className="text-sm font-semibold">
@@ -338,7 +338,7 @@ export default async function AdminReportsPage({
       <section aria-labelledby="support-queue-heading" className="mt-4 flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <h2 id="support-queue-heading" className="text-lg font-extrabold">
+            <h2 id="support-queue-heading" className="text-lg font-semibold tracking-[-0.012em]">
               고객 문의
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -362,12 +362,12 @@ export default async function AdminReportsPage({
                 </div>
                 <TicketStatusBadge status={ticket.status as TicketStatus} />
               </div>
-              <p className="rounded-xl bg-muted px-3 py-3 text-sm leading-relaxed">
+              <p className="rounded-[14px] border border-hairline bg-surface-subtle px-4 py-3 text-sm leading-relaxed text-ink">
                 {ticket.body}
               </p>
 
               {!isTicketTerminal(ticket.status) ? (
-                <form action={resolveSupportInquiryAction} className="flex flex-col gap-2 border-t border-border pt-4">
+                <form action={resolveSupportInquiryAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                   <input type="hidden" name="ticketId" value={ticket.ticketId} />
                   <input type="hidden" name="idempotencyKey" value={randomUUID()} />
                   <label htmlFor={`ticket-outcome-${ticket.ticketId}`} className="text-sm font-semibold">
@@ -414,7 +414,7 @@ function Notice({ children, tone }: { children: React.ReactNode; tone: 'success'
   return (
     <p
       role={tone === 'error' ? 'alert' : 'status'}
-      className={tone === 'error' ? 'rounded-xl bg-warn-soft px-4 py-3 text-sm' : 'rounded-xl bg-mint-soft px-4 py-3 text-sm'}
+      className={tone === 'error' ? 'rounded-[14px] border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-danger' : 'rounded-[14px] border border-success/20 bg-success-soft px-4 py-3 text-sm text-success'}
     >
       {children}
     </p>
@@ -428,8 +428,8 @@ function ReportStatusBadge({ status }: { status: ReportStatus }) {
     RESOLVED: '조치 완료',
     DISMISSED: '종결',
   }
-  const tone = status === 'RESOLVED' ? 'mint' : status === 'DISMISSED' ? 'muted' : status === 'IN_REVIEW' ? 'info' : 'warn'
-  return <StatusBadge tone={tone}>{labels[status] ?? status}</StatusBadge>
+  const variant = status === 'RESOLVED' ? 'success' : status === 'DISMISSED' ? 'neutral' : status === 'IN_REVIEW' ? 'brand' : 'warning'
+  return <StatusBadge variant={variant}>{labels[status] ?? status}</StatusBadge>
 }
 
 function TicketStatusBadge({ status }: { status: TicketStatus }) {
@@ -439,8 +439,8 @@ function TicketStatusBadge({ status }: { status: TicketStatus }) {
     ANSWERED: '답변 및 해결 완료',
     CLOSED: '종결',
   }
-  const tone = status === 'ANSWERED' ? 'mint' : status === 'CLOSED' ? 'muted' : status === 'IN_REVIEW' ? 'info' : 'warn'
-  return <StatusBadge tone={tone}>{labels[status] ?? status}</StatusBadge>
+  const variant = status === 'ANSWERED' ? 'success' : status === 'CLOSED' ? 'neutral' : status === 'IN_REVIEW' ? 'brand' : 'warning'
+  return <StatusBadge variant={variant}>{labels[status] ?? status}</StatusBadge>
 }
 
 function TripIncidentStatusBadge({ status }: { status: TripIncidentStatus }) {
@@ -450,16 +450,16 @@ function TripIncidentStatusBadge({ status }: { status: TripIncidentStatus }) {
     RESPONSIBILITY_CONFIRMED: '귀책 사실 확인',
     NOT_ESTABLISHED: '귀책 사실 불인정',
   }
-  const tone =
+  const variant =
     status === 'RESPONSIBILITY_CONFIRMED'
-      ? 'warn'
+      ? 'warning'
       : status === 'NOT_ESTABLISHED'
-        ? 'mint'
+        ? 'success'
         : status === 'START_REVIEW'
-          ? 'info'
-          : 'muted'
+          ? 'brand'
+          : 'neutral'
 
-  return <StatusBadge tone={tone}>{labels[status] ?? status}</StatusBadge>
+  return <StatusBadge variant={variant}>{labels[status] ?? status}</StatusBadge>
 }
 
 function incidentTypeLabel(type: string) {

@@ -1,9 +1,10 @@
 import { ArrowDownLeft, ArrowUpRight, Coins, Info } from 'lucide-react'
 import { requestPointsAction } from '@/app/core/actions'
 import { MobileShell } from '@/components/mobile-shell'
+import { StatusBadge } from '@/components/status-badge'
 import { TabBar } from '@/components/tab-bar'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Card, CardTitle } from '@/components/ui/card'
 import { requireCompleteUser } from '@/lib/auth/session'
 import { getPointDashboard } from '@/lib/core/service'
 import { cn } from '@/lib/utils'
@@ -43,15 +44,15 @@ export default async function PointsPage({
 
   return (
     <MobileShell>
-      <header className="sticky top-0 z-30 border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
-        <h1 className="text-lg font-extrabold">포인트</h1>
+      <header className="sticky top-0 z-30 border-b border-hairline bg-surface px-5 py-4">
+        <h1 className="text-xl font-bold">포인트</h1>
       </header>
 
       <main className="flex flex-1 flex-col gap-5 px-5 py-5">
         {message ? (
           <p
             role="status"
-            className="rounded-xl bg-mint-soft px-4 py-3 text-sm font-semibold"
+            className="rounded-[14px] bg-success-soft px-4 py-3 text-sm font-semibold text-success"
           >
             {message}
           </p>
@@ -59,49 +60,50 @@ export default async function PointsPage({
         {error ? (
           <p
             role="alert"
-            className="rounded-xl bg-warn-soft px-4 py-3 text-sm font-semibold"
+            className="rounded-[14px] bg-warning-soft px-4 py-3 text-sm font-semibold text-warning"
           >
             {error}
           </p>
         ) : null}
 
-        <div className="rounded-2xl bg-foreground p-5 text-background">
-          <div className="flex items-center gap-2">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+        <Card variant="dark" className="flex flex-col gap-5 p-5">
+          <div className="flex items-center gap-3">
+            <span className="flex size-11 items-center justify-center rounded-[14px] bg-white/10 text-white">
               <Coins className="size-5" aria-hidden />
             </span>
             <div>
-              <p className="text-xs text-background/70">총 포인트</p>
-              <p className="text-2xl font-extrabold">
+              <p className="text-xs font-medium text-white/70">총 보유 포인트 (사용 가능 + 예치 중)</p>
+              <p className="numeric text-[28px] font-bold leading-tight">
                 {formatPoints(totalPoints)}
               </p>
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-background/10 px-3 py-2.5">
-              <p className="text-xs text-background/70">예치 중</p>
-              <p className="text-base font-bold">
-                {formatPoints(data.balance.heldPoints)}
-              </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-[14px] border border-white/10 bg-white/5 px-3 py-3">
+              <p className="text-xs font-medium text-white/70">사용 가능</p>
+              <p className="numeric mt-1 text-lg font-semibold">{formatPoints(data.balance.availablePoints)}</p>
+              <p className="mt-1 text-xs text-white/70">새 모집과 정산에 사용할 수 있어요.</p>
             </div>
-            <div className="rounded-xl bg-background/10 px-3 py-2.5">
-              <p className="text-xs text-background/70">사용 가능</p>
-              <p className="text-base font-bold">
-                {formatPoints(data.balance.availablePoints)}
-              </p>
+            <div className="rounded-[14px] border border-white/10 bg-white/5 px-3 py-3">
+              <p className="text-xs font-medium text-white/70">예치 중</p>
+              <p className="numeric mt-1 text-lg font-semibold">{formatPoints(data.balance.heldPoints)}</p>
+              <p className="mt-1 text-xs text-white/70">이동 완료 뒤 정산 결과에 따라 반영돼요.</p>
             </div>
           </div>
-        </div>
+        </Card>
 
-        <div className="flex items-start gap-2 rounded-2xl bg-secondary/50 px-4 py-3 text-xs leading-relaxed text-secondary-foreground">
+        <Card variant="subtle" className="flex items-start gap-2 p-4 text-xs leading-relaxed">
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
           포인트는 관리자가 지급하는 서비스 내 가상 단위이며 구매·환전할 수
           없습니다.
-        </div>
+        </Card>
 
         <form action={requestPointsAction}>
-          <Card className="flex flex-col gap-3 p-4">
-            <h2 className="text-sm font-bold">포인트 지급 요청</h2>
+          <Card variant="surface" className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>포인트 지급 요청</CardTitle>
+              <StatusBadge variant="neutral" label="관리자 지급만 가능" />
+            </div>
             <p className="text-xs text-muted-foreground">
               예치 또는 정산에 포인트가 부족하면 관리자에게 요청하세요.
             </p>
@@ -111,7 +113,7 @@ export default async function PointsPage({
               value={crypto.randomUUID()}
             />
             <div>
-              <label htmlFor="amount" className="mb-1.5 block text-sm font-medium">
+              <label htmlFor="amount" className="mb-1.5 block text-sm font-semibold">
                 요청 포인트
               </label>
               <input
@@ -127,7 +129,7 @@ export default async function PointsPage({
               />
             </div>
             <div>
-              <label htmlFor="reason" className="mb-1.5 block text-sm font-medium">
+              <label htmlFor="reason" className="mb-1.5 block text-sm font-semibold">
                 요청 사유
               </label>
               <input
@@ -148,10 +150,10 @@ export default async function PointsPage({
 
         {data.requests.length ? (
           <section aria-labelledby="request-history-heading">
-            <h2 id="request-history-heading" className="mb-3 text-sm font-bold">
+            <h2 id="request-history-heading" className="mb-3 text-lg font-semibold">
               최근 지급 요청
             </h2>
-            <Card className="gap-0 p-0">
+            <Card variant="surface" className="gap-0 p-0">
               {data.requests.map((request, index) => (
                 <div
                   key={request.requestId}
@@ -185,10 +187,10 @@ export default async function PointsPage({
 
         {data.escrowShortfalls.length ? (
           <section aria-labelledby="escrow-shortfall-heading">
-            <h2 id="escrow-shortfall-heading" className="mb-3 text-sm font-bold">
+            <h2 id="escrow-shortfall-heading" className="mb-3 text-lg font-semibold">
               예치 부족분
             </h2>
-            <Card className="gap-0 p-0">
+            <Card variant="surface" className="gap-0 p-0">
               {data.escrowShortfalls.map((shortfall, index) => (
                 <div
                   key={shortfall.shortfallId}
@@ -221,11 +223,11 @@ export default async function PointsPage({
         ) : null}
 
         <section aria-labelledby="ledger-heading">
-          <h2 id="ledger-heading" className="mb-3 text-sm font-bold">
+          <h2 id="ledger-heading" className="mb-3 text-lg font-semibold">
             포인트 원장
           </h2>
           {data.ledger.length ? (
-            <Card className="gap-0 p-0">
+            <Card variant="surface" className="gap-0 p-0">
               {data.ledger.map((entry, index) => {
                 const availableDelta = Number(entry.availableDelta)
                 const heldDelta = Number(entry.heldDelta)
@@ -242,8 +244,8 @@ export default async function PointsPage({
                       className={cn(
                         'flex size-9 items-center justify-center rounded-full',
                         availableDelta >= 0
-                          ? 'bg-mint-soft text-mint'
-                          : 'bg-warn-soft text-warn',
+                          ? 'bg-success-soft text-success'
+                          : 'bg-warning-soft text-warning',
                       )}
                     >
                       {availableDelta >= 0 ? (
@@ -260,11 +262,11 @@ export default async function PointsPage({
                         {entry.reason} · {formatDate(entry.createdAt)}
                       </p>
                     </div>
-                    <div className="shrink-0 text-right text-xs font-bold">
+                    <div className="numeric shrink-0 text-right text-xs font-semibold tabular-nums">
                       {availableDelta ? (
                         <p
                           className={
-                            availableDelta > 0 ? 'text-mint' : 'text-warn'
+                            availableDelta > 0 ? 'text-success' : 'text-warning'
                           }
                         >
                           사용 가능 {availableDelta > 0 ? '+' : ''}
@@ -283,7 +285,7 @@ export default async function PointsPage({
               })}
             </Card>
           ) : (
-            <Card className="p-4 text-sm text-muted-foreground">
+            <Card variant="subtle" className="p-4 text-sm text-ink-secondary">
               아직 포인트 거래 내역이 없습니다.
             </Card>
           )}

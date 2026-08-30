@@ -3,11 +3,18 @@ import { resolveFareDisputeAction } from '@/app/core/actions'
 import { AdminReadPage } from '@/components/admin/admin-read-page'
 import { Card } from '@/components/ui/card'
 import { PendingSubmitButton } from '@/components/pending-submit-button'
+import { StatusBadge } from '@/components/status-badge'
 import { requireAdmin } from '@/lib/auth/session'
 import {
   getAdminFareDisputes,
   getAdminOperationsDashboard,
 } from '@/lib/admin/service'
+
+const KST_DATE_TIME = new Intl.DateTimeFormat('ko-KR', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'Asia/Seoul',
+})
 
 export default async function AdminSettlementsPage({
   searchParams,
@@ -26,25 +33,25 @@ export default async function AdminSettlementsPage({
       description="이의제기는 관리자 검토만 가능합니다. 수정 요금 재제출을 요청해도 원장과 잔액은 변경되지 않습니다."
     >
       {message ? (
-        <p className="rounded-xl bg-mint-soft px-4 py-3 text-sm" role="status">
+        <p className="rounded-[14px] border border-success/20 bg-success-soft px-4 py-3 text-sm text-success" role="status">
           {message}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-xl bg-warn-soft px-4 py-3 text-sm" role="alert">
+        <p className="rounded-[14px] border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">
           {error}
         </p>
       ) : null}
       <div className="grid grid-cols-2 gap-3">
-        <Card>
+        <Card variant="subtle" className="border border-hairline">
           <p className="text-sm text-muted-foreground">참여자 확인 대기</p>
-          <p className="mt-1 text-2xl font-extrabold">
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
             {Number(data.queues.pendingSettlements)}건
           </p>
         </Card>
-        <Card>
+        <Card variant="subtle" className="border border-hairline">
           <p className="text-sm text-muted-foreground">열린 이의제기</p>
-          <p className="mt-1 text-2xl font-extrabold">
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
             {Number(data.queues.openDisputes)}건
           </p>
         </Card>
@@ -53,21 +60,24 @@ export default async function AdminSettlementsPage({
       <section className="flex flex-col gap-3" aria-label="열린 실제 요금 이의제기">
         {disputes.length ? (
           disputes.map((dispute) => (
-            <Card key={dispute.disputeId} className="flex flex-col gap-3" role="article">
-              <div>
-                <p className="font-bold">
-                  {dispute.origin} → {dispute.destination}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {dispute.participantName} · {dispute.participantStudentId} ·{' '}
-                  {new Date(dispute.submittedAt).toLocaleString('ko-KR')}
-                </p>
+            <Card key={dispute.disputeId} className="flex flex-col gap-4" role="article">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold tracking-[-0.012em]">
+                    {dispute.origin} → {dispute.destination}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-secondary">
+                    {dispute.participantName} · {dispute.participantStudentId} ·{' '}
+                    {KST_DATE_TIME.format(new Date(dispute.submittedAt))}
+                  </p>
+                </div>
+                <StatusBadge variant="neutral" label={`정산 상태 · ${dispute.settlementStatus}`} />
               </div>
-              <dl className="grid grid-cols-2 gap-2 text-sm" aria-label="운행 및 정산 정보">
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm" aria-label="운행 및 정산 정보">
                 <div>
                   <dt className="text-muted-foreground">출발 예정 시각</dt>
                   <dd className="font-semibold">
-                    {new Date(dispute.departureAt).toLocaleString('ko-KR')}
+                    {KST_DATE_TIME.format(new Date(dispute.departureAt))}
                   </dd>
                 </div>
                 <div>
@@ -97,28 +107,28 @@ export default async function AdminSettlementsPage({
                 <div>
                   <dt className="text-muted-foreground">확인 기한</dt>
                   <dd className="font-semibold">
-                    {new Date(dispute.confirmationDeadline).toLocaleString('ko-KR')}
+                    {KST_DATE_TIME.format(new Date(dispute.confirmationDeadline))}
                   </dd>
                 </div>
               </dl>
               {dispute.allocationPolicy === 'HOST_APPROVAL_ORDER' &&
               dispute.settlementStatus === 'PROVISIONALLY_SETTLED' ? (
-                <p className="rounded-xl bg-info-soft px-3 py-2 text-sm" role="status">
+                <p className="rounded-[14px] border border-info/20 bg-info-soft px-3 py-2 text-sm text-info" role="status">
                   잠정 정산 상태입니다. 이의제기 기한:{' '}
                   {dispute.disputeDeadline
-                    ? new Date(dispute.disputeDeadline).toLocaleString('ko-KR')
+                    ? KST_DATE_TIME.format(new Date(dispute.disputeDeadline))
                     : '확인 필요'}
                 </p>
               ) : null}
               <p className="text-xs text-muted-foreground">
                 {dispute.routeProvider && dispute.routeCalculatedAt
-                  ? `경로 제공자 ${dispute.routeProvider} · ${new Date(dispute.routeCalculatedAt).toLocaleString('ko-KR')} 산정`
+                  ? `경로 제공자 ${dispute.routeProvider} · ${KST_DATE_TIME.format(new Date(dispute.routeCalculatedAt))} 산정`
                   : '경로 거리·시간 근거를 확인할 수 없습니다.'}
               </p>
-              <p className="rounded-xl bg-muted px-3 py-2 text-sm leading-relaxed">
+              <p className="rounded-[14px] border border-hairline bg-surface-subtle px-4 py-3 text-sm leading-relaxed text-ink">
                 {dispute.reason}
               </p>
-              <form action={resolveFareDisputeAction} className="flex flex-col gap-2">
+              <form action={resolveFareDisputeAction} className="flex flex-col gap-3 border-t border-hairline pt-4">
                 <input type="hidden" name="tripId" value={dispute.tripId} />
                 <input type="hidden" name="disputeId" value={dispute.disputeId} />
                 <input type="hidden" name="idempotencyKey" value={randomUUID()} />

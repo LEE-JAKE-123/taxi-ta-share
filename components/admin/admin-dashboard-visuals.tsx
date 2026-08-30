@@ -44,7 +44,7 @@ export function AdminDashboardVisuals({
 
   return (
     <aside className="flex min-w-0 flex-col gap-4 xl:sticky xl:top-5 xl:self-start" aria-label="운영 기록 추이">
-      <Card className="flex flex-col justify-center p-4 lg:min-h-36">
+      <Card variant="subtle" className="flex flex-col justify-center border border-hairline p-5 lg:min-h-36">
         <p className="text-xs font-semibold text-primary">OPERATIONS ANALYTICS</p>
         <h2 className="mt-1 text-xl font-bold tracking-[-0.02em]">최근 24시간 운영 기록</h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -68,7 +68,7 @@ export function AdminDashboardVisuals({
       <Card id={detailsId} className="overflow-hidden p-0" aria-live="polite">
         <div className="border-b border-hairline px-5 py-4">
           <div className="flex items-center gap-2">
-            <ChartNoAxesCombined className="size-4 text-primary" aria-hidden />
+            <ChartNoAxesCombined className="size-4 text-brand" aria-hidden />
             <div>
               <h3 className="font-bold">{selectedDefinition.label}</h3>
               <p className="mt-1 text-xs text-muted-foreground">최근 24시간 · 1시간 단위 · 건수 · KST</p>
@@ -96,9 +96,9 @@ function MetricBlock({
 }) {
   const total = series ? sumCounts(series.points) : null
   return (
-    <button type="button" onClick={onSelect} aria-pressed={isSelected} aria-controls={detailsId} className="rounded-[18px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-      <Card className={`h-full p-4 transition-colors ${isSelected ? 'border-primary bg-primary/5' : 'hover:bg-surface-subtle'}`}>
-        <p className="text-xs text-muted-foreground">{metric.label}</p>
+    <button type="button" onClick={onSelect} aria-pressed={isSelected} aria-controls={detailsId} className="rounded-[18px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      <Card variant={isSelected ? 'selected' : 'interactive'} className="h-full p-4">
+        <p className="text-xs text-ink-secondary">{metric.label}</p>
         {total === null ? <p className="mt-2 text-sm font-bold text-warn">조회 불가</p> : <p className="mt-1 text-2xl font-bold tabular-nums">{total}건</p>}
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{total === null ? '선택해 재시도 안내 보기' : metric.description}</p>
       </Card>

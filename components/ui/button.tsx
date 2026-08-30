@@ -4,22 +4,17 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  "group/button inline-flex min-h-11 shrink-0 items-center justify-center border border-transparent bg-clip-padding text-sm font-semibold whitespace-nowrap outline-none select-none transition-[transform,background-color,border-color,color] duration-150 motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:not-aria-[haspopup]:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 aria-busy:pointer-events-none aria-busy:opacity-70 aria-invalid:border-destructive aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex min-h-11 shrink-0 items-center justify-center border border-transparent bg-clip-padding text-sm font-semibold whitespace-nowrap outline-none select-none transition-[transform,background-color,border-color,color] duration-150 motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 aria-busy:pointer-events-none aria-busy:opacity-70 aria-invalid:border-destructive aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        primary: 'rounded-[14px] bg-primary text-primary-foreground hover:bg-action-focus',
+        primary: 'rounded-[14px] bg-primary text-primary-foreground hover:bg-action-focus active:not-aria-[haspopup]:scale-[0.98]',
         secondary:
           'rounded-[14px] border-hairline bg-surface text-ink hover:bg-surface-subtle aria-expanded:bg-surface-subtle',
         dark: 'rounded-[14px] bg-surface-dark text-white hover:bg-surface-black',
-        outline:
-          'rounded-[14px] border-hairline bg-surface text-ink hover:bg-surface-subtle aria-expanded:bg-surface-subtle',
         ghost:
           'rounded-[14px] hover:bg-surface-subtle hover:text-ink aria-expanded:bg-surface-subtle',
         destructive: 'rounded-[14px] bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-destructive',
-        link: 'min-h-0 rounded-none text-action underline-offset-4 hover:underline',
-        default: 'rounded-[14px] bg-primary text-primary-foreground hover:bg-action-focus',
-        utility: 'rounded-[14px] bg-surface-dark text-white hover:bg-surface-black',
       },
       size: {
         default:
@@ -42,7 +37,7 @@ const buttonVariants = cva(
 
 function Button({
   className,
-  variant = 'default',
+  variant = 'primary',
   size = 'default',
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {

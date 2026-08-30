@@ -27,6 +27,7 @@
   --color-action-on-dark: var(--brand-soft);
   --color-hairline: var(--hairline);
   --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --color-warning: var(--warning);
   --color-success: var(--success);
 
@@ -143,7 +144,11 @@
 
 @layer components {
   .app-input {
-    @apply min-h-12 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15;
+    @apply min-h-12 w-full rounded-[14px] border border-border bg-card px-4 py-3 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15;
+  }
+
+  .app-input-search {
+    @apply rounded-[16px];
   }
 
   .brand-route-gradient {

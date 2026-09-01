@@ -48,6 +48,7 @@ export async function POST(request: Request) {
       durationSeconds: evidence.durationSeconds,
       estimatedFareWon: evidence.estimatedFareWon,
       calculatedAt: evidence.calculatedAt,
+      expiresAt: evidence.expiresAt,
       ...(evidence.geometry ? { geometry: evidence.geometry } : {}),
     }
     return NextResponse.json(

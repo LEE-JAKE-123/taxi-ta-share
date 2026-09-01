@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Coordinates, RouteGeometry } from '@/lib/routing/types'
@@ -24,6 +24,35 @@ type KakaoMaps = {
   LatLngBounds: new () => { extend(point: unknown): void }
 }
 
+const KAKAO_MAP_RETRY_EVENT = 'taxi-kakao-map-retry'
+const MAP_SDK_LOAD_TIMEOUT_MS = 10_000
+
+function mapInitializationSignature({
+  origin,
+  destination,
+  geometry,
+  key,
+  retryNonce,
+}: {
+  origin?: Coordinates | null
+  destination?: Coordinates | null
+  geometry?: RouteGeometry
+  key?: string
+  retryNonce: number
+}) {
+  const coordinateSignature = (point?: Coordinates | null) =>
+    point ? `${point.latitude},${point.longitude}` : ''
+
+  return [
+    key ?? '',
+    coordinateSignature(origin),
+    coordinateSignature(destination),
+    geometry?.kind ?? '',
+    geometry?.points.map(coordinateSignature).join(';') ?? '',
+    retryNonce,
+  ].join('|')
+}
+
 declare global {
   interface Window {
     kakao?: { maps: KakaoMaps }
@@ -32,7 +61,10 @@ declare global {
 
 function createMarkerImage(maps: KakaoMaps, color: string, label: '출' | '도') {
   if (!maps.MarkerImage || !maps.Size || !maps.Point) return undefined
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42"><path fill="${color}" stroke="white" stroke-width="2" d="M17 1C8.7 1 2 7.7 2 16c0 11.3 15 25 15 25s15-13.7 15-25C32 7.7 25.3 1 17 1Z"/><text x="17" y="20" text-anchor="middle" fill="white" font-family="sans-serif" font-size="10" font-weight="700">${label}</text></svg>`
+  const destinationCenter = label === '도'
+    ? `<circle cx="17" cy="16" r="8" fill="white" stroke="${color}" stroke-width="2"/><text x="17" y="20" text-anchor="middle" fill="${color}" font-family="sans-serif" font-size="10" font-weight="700">${label}</text>`
+    : `<text x="17" y="20" text-anchor="middle" fill="white" font-family="sans-serif" font-size="10" font-weight="700">${label}</text>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42"><path fill="${color}" stroke="white" stroke-width="2" d="M17 1C8.7 1 2 7.7 2 16c0 11.3 15 25 15 25s15-13.7 15-25C32 7.7 25.3 1 17 1Z"/>${destinationCenter}</svg>`
   return new maps.MarkerImage(
     `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
     new maps.Size(34, 42),
@@ -52,41 +84,111 @@ export function RouteMap({
   className?: string
 }) {
   const container = useRef<HTMLDivElement>(null)
-  const [error, setError] = useState<string>()
-  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<{ message: string; signature: string }>()
+  const [loadedSignature, setLoadedSignature] = useState<string>()
   const [retryNonce, setRetryNonce] = useState(0)
-  const [viewportResetScheduled, setViewportResetScheduled] = useState(false)
+  const resetViewportRef = useRef<(() => void) | null>(null)
   const key = process.env.NEXT_PUBLIC_KAKAO_MAP_JS_KEY
+  const initializationSignature = mapInitializationSignature({
+    origin,
+    destination,
+    geometry,
+    key,
+    retryNonce,
+  })
+  const initializationRef = useRef({
+    origin,
+    destination,
+    geometry,
+    key,
+    signature: initializationSignature,
+  })
+  const latestInitializationSignatureRef = useRef(initializationSignature)
+  useLayoutEffect(() => {
+    initializationRef.current = {
+      origin,
+      destination,
+      geometry,
+      key,
+      signature: initializationSignature,
+    }
+    latestInitializationSignatureRef.current = initializationSignature
+    // The signature includes all snapshot fields, so equal cloned props do not reset the map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initializationSignature])
+  const loaded = loadedSignature === initializationSignature
   const visibleError = key
-    ? error
+    ? error?.signature === initializationSignature
+      ? error.message
+      : undefined
     : '카카오 지도 JavaScript 키가 설정되지 않았습니다.'
 
   useEffect(() => {
-    if (!key || (!origin && !destination)) return
+    const retry = () => {
+      setError(undefined)
+      setRetryNonce((value) => value + 1)
+    }
+
+    window.addEventListener(KAKAO_MAP_RETRY_EVENT, retry)
+    return () => window.removeEventListener(KAKAO_MAP_RETRY_EVENT, retry)
+  }, [])
+
+  useEffect(() => {
+    const {
+      origin: effectOrigin,
+      destination: effectDestination,
+      geometry: effectGeometry,
+      key: effectKey,
+      signature: effectSignature,
+    } = initializationRef.current
+    if (!effectKey || (!effectOrigin && !effectDestination)) return
 
     let cancelled = false
+    let mapsLoadTimedOut = false
+    let mapsLoadTimeout: number | undefined
+    let scriptLoadTimedOut = false
+    let scriptLoadTimeout: number | undefined
     const overlays: KakaoOverlay[] = []
-    let viewportResetTimer: number | null = null
-    let viewportResetGuardTimer: number | null = null
-    let removeViewportListeners: (() => void) | null = null
+    resetViewportRef.current = null
 
-    const clearViewportReset = () => {
-      if (viewportResetTimer) window.clearTimeout(viewportResetTimer)
-      if (viewportResetGuardTimer) window.clearTimeout(viewportResetGuardTimer)
-      viewportResetTimer = null
-      viewportResetGuardTimer = null
-      setViewportResetScheduled(false)
+    const isCurrentInitialization = () =>
+      !cancelled &&
+      latestInitializationSignatureRef.current === effectSignature
+
+    const clearMapsLoadTimeout = () => {
+      if (mapsLoadTimeout !== undefined) {
+        window.clearTimeout(mapsLoadTimeout)
+        mapsLoadTimeout = undefined
+      }
+    }
+    const clearScriptLoadTimeout = () => {
+      if (scriptLoadTimeout !== undefined) {
+        window.clearTimeout(scriptLoadTimeout)
+        scriptLoadTimeout = undefined
+      }
+    }
+    const reportInitializationFailure = (message: string) => {
+      if (isCurrentInitialization()) {
+        setError({ message, signature: effectSignature })
+      }
     }
 
     const initialize = () => {
       const maps = window.kakao?.maps
       if (!maps || !container.current) {
-        if (!cancelled) setError('지도를 불러오지 못했습니다.')
+        reportInitializationFailure('지도를 불러오지 못했습니다.')
         return
       }
-      maps.load(() => {
-        if (cancelled || !container.current) return
-        const first = origin ?? destination
+      mapsLoadTimeout = window.setTimeout(() => {
+        mapsLoadTimedOut = true
+        reportInitializationFailure('지도 SDK 초기화 시간이 초과되었습니다.')
+      }, MAP_SDK_LOAD_TIMEOUT_MS)
+      try {
+        maps.load(() => {
+        clearMapsLoadTimeout()
+        if (mapsLoadTimedOut || !isCurrentInitialization() || !container.current) return
+        try {
+        const first = effectOrigin ?? effectDestination
         if (!first) return
 
         container.current.replaceChildren()
@@ -97,8 +199,8 @@ export function RouteMap({
           .getPropertyValue('--brand')
           .trim()
         const displayPoints = [
-          ...(origin ? [{ point: origin, label: '출' as const }] : []),
-          ...(destination ? [{ point: destination, label: '도' as const }] : []),
+          ...(effectOrigin ? [{ point: effectOrigin, label: '출' as const }] : []),
+          ...(effectDestination ? [{ point: effectDestination, label: '도' as const }] : []),
         ]
         for (const { point, label } of displayPoints) {
           const position = new maps.LatLng(point.latitude, point.longitude)
@@ -110,27 +212,13 @@ export function RouteMap({
           bounds.extend(position)
         }
 
-        const canResetViewport = displayPoints.length > 1 || Boolean(geometry?.points.length)
-        let isResettingViewport = false
+        const canResetViewport = displayPoints.length > 1 || Boolean(effectGeometry?.points.length)
         const resetViewport = () => {
           if (!canResetViewport || cancelled) return
-          viewportResetTimer = null
-          isResettingViewport = true
           map.setBounds(bounds)
-          setViewportResetScheduled(false)
-          viewportResetGuardTimer = window.setTimeout(() => {
-            isResettingViewport = false
-            viewportResetGuardTimer = null
-          }, 500)
         }
-        const scheduleViewportReset = () => {
-          if (!canResetViewport || isResettingViewport || cancelled) return
-          if (viewportResetTimer) window.clearTimeout(viewportResetTimer)
-          setViewportResetScheduled(true)
-          viewportResetTimer = window.setTimeout(resetViewport, 5000)
-        }
-        if (geometry?.kind === 'LINE_STRING' && geometry.points.length >= 2) {
-          const path = geometry.points.map(
+        if (effectGeometry?.kind === 'LINE_STRING' && effectGeometry.points.length >= 2) {
+          const path = effectGeometry.points.map(
             (point) => new maps.LatLng(point.latitude, point.longitude),
           )
           overlays.push(
@@ -143,49 +231,74 @@ export function RouteMap({
               strokeStyle: 'solid',
             }),
           )
-          for (const point of geometry.points) {
+          for (const point of effectGeometry.points) {
             bounds.extend(new maps.LatLng(point.latitude, point.longitude))
           }
         }
 
-        if (canResetViewport) map.setBounds(bounds)
-        const viewportEvents = ['drag', 'dragend', 'zoom_start', 'zoom_changed', 'click']
         if (canResetViewport) {
-          for (const eventName of viewportEvents) {
-            maps.event.addListener(map, eventName, scheduleViewportReset)
-          }
-          removeViewportListeners = () => {
-            for (const eventName of viewportEvents) {
-              maps.event.removeListener(map, eventName, scheduleViewportReset)
-            }
-          }
+          resetViewport()
+          resetViewportRef.current = resetViewport
         }
-        setLoaded(true)
+        setLoadedSignature(effectSignature)
         setError(undefined)
-      })
+        } catch {
+          reportInitializationFailure('지도를 초기화하지 못했습니다.')
+        }
+        })
+      } catch {
+        clearMapsLoadTimeout()
+        reportInitializationFailure('지도 SDK를 초기화하지 못했습니다.')
+      }
     }
 
     if (window.kakao?.maps) {
       initialize()
     } else {
-      const existing = document.querySelector<HTMLScriptElement>(
+      const existingScript = document.querySelector<HTMLScriptElement>(
         'script[data-taxi-kakao-map]',
       )
-      const script = existing ?? document.createElement('script')
-      const onLoad = () => initialize()
-      const onError = () => setError('지도 SDK를 불러오지 못했습니다.')
+      const canReuseScript =
+        existingScript?.dataset.taxiKakaoMapKey === effectKey &&
+        existingScript.dataset.taxiKakaoMapStatus === 'loading'
+      let script: HTMLScriptElement
+      let appendScript = false
+      if (canReuseScript && existingScript) {
+        script = existingScript
+      } else {
+        existingScript?.remove()
+        script = document.createElement('script')
+        script.dataset.taxiKakaoMap = 'true'
+        script.dataset.taxiKakaoMapKey = effectKey
+        script.dataset.taxiKakaoMapStatus = 'loading'
+        script.async = true
+        script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(effectKey)}&autoload=false`
+        appendScript = true
+      }
+      const onLoad = () => {
+        clearScriptLoadTimeout()
+        if (scriptLoadTimedOut) return
+        script.dataset.taxiKakaoMapStatus = 'loaded'
+        initialize()
+      }
+      const onError = () => {
+        clearScriptLoadTimeout()
+        script.dataset.taxiKakaoMapStatus = 'error'
+        reportInitializationFailure('지도 SDK를 불러오지 못했습니다.')
+      }
       script.addEventListener('load', onLoad)
       script.addEventListener('error', onError)
-      if (!existing) {
-        script.dataset.taxiKakaoMap = 'true'
-        script.async = true
-        script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`
-        document.head.appendChild(script)
-      }
+      scriptLoadTimeout = window.setTimeout(() => {
+        scriptLoadTimedOut = true
+        script.dataset.taxiKakaoMapStatus = 'error'
+        reportInitializationFailure('지도 SDK를 불러오는 시간이 초과되었습니다.')
+      }, MAP_SDK_LOAD_TIMEOUT_MS)
+      if (appendScript) document.head.appendChild(script)
       return () => {
         cancelled = true
-        clearViewportReset()
-        removeViewportListeners?.()
+        clearMapsLoadTimeout()
+        clearScriptLoadTimeout()
+        resetViewportRef.current = null
         for (const overlay of overlays) overlay.setMap(null)
         script.removeEventListener('load', onLoad)
         script.removeEventListener('error', onError)
@@ -194,21 +307,26 @@ export function RouteMap({
 
     return () => {
       cancelled = true
-      clearViewportReset()
-      removeViewportListeners?.()
+      clearMapsLoadTimeout()
+      clearScriptLoadTimeout()
+      resetViewportRef.current = null
       for (const overlay of overlays) overlay.setMap(null)
     }
-  }, [destination, geometry, key, origin, retryNonce])
+  }, [initializationSignature])
 
   function retryMapLoad() {
-    document.querySelector('script[data-taxi-kakao-map]')?.remove()
-    setLoaded(false)
-    setError(undefined)
-    setViewportResetScheduled(false)
-    setRetryNonce((value) => value + 1)
+    window.dispatchEvent(new Event(KAKAO_MAP_RETRY_EVENT))
   }
 
   const hasRoute = geometry?.kind === 'LINE_STRING' && geometry.points.length >= 2
+  const routeStatus = hasRoute
+    ? ' · 예상 이동 경로'
+    : origin || destination
+      ? ' · 경로 정보 없음'
+      : ''
+  const canResetViewport = Boolean(
+    (origin && destination) || geometry?.points.length,
+  )
   const markerLegend = [
     ...(origin ? ['출 출발지'] : []),
     ...(destination ? ['도 도착지'] : []),
@@ -216,7 +334,7 @@ export function RouteMap({
 
   return (
     <figure
-      aria-label={`지도: ${markerLegend || '장소 미선택'}${hasRoute ? ' · 예상 이동 경로' : ''}`}
+      aria-label={`지도: ${markerLegend || '장소 미선택'}${routeStatus}`}
       className={cn(
         'relative min-h-60 overflow-hidden rounded-[22px] border border-hairline bg-surface-subtle sm:min-h-72',
         className,
@@ -225,14 +343,22 @@ export function RouteMap({
       <div ref={container} className="absolute inset-0" />
       <figcaption className="sr-only">
         {markerLegend || '출발지와 도착지를 선택하면 지도에 표시됩니다.'}
-        {hasRoute ? ' · 예상 이동 경로가 표시됩니다.' : ''}
+        {routeStatus}
       </figcaption>
-      <p className="sr-only" aria-live="polite">
-        {viewportResetScheduled ? '지도 조작이 멈추면 5초 후 전체 경로 보기로 돌아갑니다.' : ''}
-      </p>
+      {loaded && canResetViewport ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => resetViewportRef.current?.()}
+          className="absolute right-3 top-3 z-10 bg-surface/95"
+        >
+          전체 경로 보기
+        </Button>
+      ) : null}
       {loaded && (origin || destination) ? (
         <p className="absolute bottom-3 left-3 rounded-[12px] border border-hairline bg-surface/95 px-3 py-2 text-xs font-semibold text-ink">
-          {markerLegend}{hasRoute ? ' · 예상 이동 경로' : ''}
+          {markerLegend}{routeStatus}
         </p>
       ) : null}
       {visibleError ? (

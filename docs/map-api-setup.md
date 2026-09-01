@@ -2,8 +2,9 @@
 
 관련 요구사항: FR-10~15, FR-20~22, FR-32, TR-04, TR-05, TR-08.
 
-서버는 `MAP_PROVIDER` 값에 따라 `naver`, `kakao`, `auto` 중 하나를 사용한다.
-`auto`는 네이버를 먼저 호출하고 실패하면 카카오로 전환한다. 장소 검색과
+MVP 서버 지도 제공자는 카카오로 고정하며 `MAP_PROVIDER=kakao`를 사용한다.
+`naver`와 `auto`는 제공자 전환 검증을 위한 어댑터 옵션으로만 유지한다. `auto`는
+네이버를 먼저 호출하고 실패하면 카카오로 전환한다. 장소 검색과
 자동차 경로 조회는 `/api/places`, `/api/route-estimate` Route Handler를
 통해서만 수행하며 REST 키와 공급자 원본 응답은 브라우저에 전달하지 않는다.
 
@@ -11,7 +12,7 @@
 
 | 변수 | 공개 여부 | 용도 |
 | --- | --- | --- |
-| `MAP_PROVIDER` | 서버 | `naver`, `kakao`, `auto` |
+| `MAP_PROVIDER` | 서버 | Production: `kakao`; 전환 검증: `naver`, `auto` |
 | `KAKAO_REST_API_KEY` | 서버 | Kakao Local·Mobility |
 | `NAVER_MAPS_CLIENT_ID` | 서버 | Naver Maps API Gateway |
 | `NAVER_MAPS_CLIENT_SECRET` | 서버 | Naver Maps API Gateway |

@@ -65,8 +65,8 @@ TaxiTaShare는 SEED와 같은 외부 디자인 시스템의 **운영 방식**(Fo
 | `--hairline` | `#DDE4DF` | 카드·섹션 경계 |
 | `--success` / `--success-soft` | `#187A56` / `#E5F2EB` | 완료·정상 정산 |
 | `--warning` / `--warning-soft` | `#8A5713` / `#FFF4DF` | 출발 임박·확인 필요 |
-| `--danger` / `--danger-soft` | `#C24752` / `#FCEBED` | 취소·오류·위험 행동 |
-| `--info` / `--info-soft` | `#3E7867` / `#E8F1ED` | 일반 안내·경로 보조 |
+| `--danger` / `--danger-soft` | `#B43A46` / `#FCEBED` | 취소·오류·위험 행동 |
+| `--info` / `--info-soft` | `#3C7563` / `#E8F1ED` | 일반 안내·경로 보조 |
 
 - 직접 hex를 컴포넌트에 작성하지 않고 의미 토큰을 사용한다.
 - taxi yellow, 형광 민트·블루, 보라·핑크 서브 액센트, 무지개 gradient를 사용하지 않는다.

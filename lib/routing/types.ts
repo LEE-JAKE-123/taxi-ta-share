@@ -31,6 +31,8 @@ export type RouteEstimate = {
   durationSeconds: number
   estimatedFareWon: number | null
   calculatedAt: string
+  /** The public display estimate must be refreshed after this instant. */
+  expiresAt: string
   geometry?: RouteGeometry
 }
 

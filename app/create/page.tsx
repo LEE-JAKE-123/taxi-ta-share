@@ -8,9 +8,11 @@ import { MobileShell } from '@/components/mobile-shell'
 import { RouteMap } from '@/components/route-map'
 import { TopBar } from '@/components/top-bar'
 import { Button } from '@/components/ui/button'
+import { isFreshRouteEstimate } from '@/lib/routing/estimate-preview'
 import type { RouteEstimate, SelectablePlaceResult } from '@/lib/routing/types'
 
 const initialState: CreateTripState = {}
+const ROUTE_ESTIMATE_REQUEST_TIMEOUT_MS = 10_000
 const TWELVE_HOUR_OPTIONS = Array.from({ length: 12 }, (_, hour) =>
   String(hour + 1).padStart(2, '0'),
 )
@@ -34,6 +36,9 @@ export default function CreateRoomPage() {
   const [estimateError, setEstimateError] = useState('')
   const [estimating, setEstimating] = useState(false)
   const [estimateRetry, setEstimateRetry] = useState(0)
+  const [estimateCheckedAt, setEstimateCheckedAt] = useState(() => Date.now())
+  const [estimateStale, setEstimateStale] = useState(false)
+  const estimateRequestSequence = useRef(0)
   const [maxParticipants, setMaxParticipants] = useState(3)
 
   useEffect(() => {
@@ -45,12 +50,27 @@ export default function CreateRoomPage() {
   }, [])
 
   useEffect(() => {
+    const sequence = ++estimateRequestSequence.current
     if (!origin || !destination) return
+
     const controller = new AbortController()
+    let active = true
+    let requestTimedOut = false
+    let requestTimeout: number | undefined
     const timer = window.setTimeout(() => {
+      if (!active || sequence !== estimateRequestSequence.current) return
       setEstimating(true)
       setEstimate(null)
+      setEstimateStale(false)
       setEstimateError('')
+      requestTimeout = window.setTimeout(() => {
+        if (!active || sequence !== estimateRequestSequence.current) return
+
+        requestTimedOut = true
+        controller.abort()
+        setEstimating(false)
+        setEstimateError('경로 조회 시간이 초과되었습니다. 경로를 다시 시도해 주세요.')
+      }, ROUTE_ESTIMATE_REQUEST_TIMEOUT_MS)
       fetch('/api/route-estimate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -65,21 +85,54 @@ export default function CreateRoomPage() {
           if (!response.ok || !body.estimate) {
             throw new Error(body.error || '경로를 조회하지 못했습니다.')
           }
+          if (!active || sequence !== estimateRequestSequence.current || requestTimedOut) return
+
+          const checkedAt = Date.now()
+          if (!isFreshRouteEstimate(body.estimate, checkedAt)) {
+            setEstimate(null)
+            setEstimateStale(true)
+            return
+          }
+          setEstimateCheckedAt(checkedAt)
           setEstimate(body.estimate)
         })
         .catch((error: unknown) => {
-          if (error instanceof DOMException && error.name === 'AbortError') return
+          if (!active || sequence !== estimateRequestSequence.current || (error instanceof DOMException && error.name === 'AbortError')) return
           setEstimateError(
             error instanceof Error ? error.message : '경로를 조회하지 못했습니다.',
           )
         })
-        .finally(() => setEstimating(false))
+        .finally(() => {
+          if (requestTimeout !== undefined) window.clearTimeout(requestTimeout)
+          if (active && sequence === estimateRequestSequence.current) {
+            setEstimating(false)
+          }
+        })
     }, 0)
     return () => {
+      active = false
       window.clearTimeout(timer)
+      if (requestTimeout !== undefined) window.clearTimeout(requestTimeout)
       controller.abort()
     }
   }, [destination, estimateRetry, origin])
+
+  useEffect(() => {
+    if (!estimate) return
+
+    const expiresAt = Date.parse(estimate.expiresAt)
+    if (!Number.isFinite(expiresAt)) return
+
+    const timer = window.setTimeout(
+      () => {
+        setEstimateCheckedAt(Date.now())
+        setEstimate(null)
+        setEstimateStale(true)
+      },
+      Math.max(0, expiresAt - Date.now()) + 1,
+    )
+    return () => window.clearTimeout(timer)
+  }, [estimate])
 
   const minimumDeparture = roundUpToNextTenMinutes(new Date())
   const minDepartureDate = formatDateInput(minimumDeparture)
@@ -123,8 +176,12 @@ export default function CreateRoomPage() {
       ),
     )
   }
+  const estimateExpired = estimateStale || Boolean(
+    estimate && !isFreshRouteEstimate(estimate, estimateCheckedAt),
+  )
+  const displayedEstimate = estimateExpired ? null : estimate
   const canCreate = Boolean(
-    idempotencyKey && origin && destination && estimate?.estimatedFareWon && departureAt,
+    idempotencyKey && origin && destination && displayedEstimate?.estimatedFareWon && departureAt,
   )
 
   return (
@@ -139,13 +196,13 @@ export default function CreateRoomPage() {
         <fieldset disabled={pending} className="flex flex-1 flex-col gap-6 px-4 py-5 pb-32 disabled:opacity-70 min-[391px]:px-5 lg:mx-auto lg:w-full lg:max-w-5xl lg:px-8">
           <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(28.5rem,1fr)]">
             <div className="flex min-w-0 flex-col gap-6 lg:h-full">
-          <PlaceSearch label="출발지" icon={MapPin} selected={origin} onSelect={(place) => { setOrigin(place); setEstimate(null) }} error={state.fieldErrors?.origin?.[0]} />
-          <PlaceSearch label="목적지" icon={Flag} selected={destination} onSelect={(place) => { setDestination(place); setEstimate(null) }} error={state.fieldErrors?.destination?.[0]} />
+          <PlaceSearch label="출발지" icon={MapPin} selected={origin} onSelect={(place) => { setOrigin(place); setEstimate(null); setEstimateStale(false) }} error={state.fieldErrors?.origin?.[0]} />
+          <PlaceSearch label="목적지" icon={Flag} selected={destination} onSelect={(place) => { setDestination(place); setEstimate(null); setEstimateStale(false) }} error={state.fieldErrors?.destination?.[0]} />
 
           <RouteMap
             origin={origin}
             destination={destination}
-            geometry={estimate?.geometry}
+            geometry={displayedEstimate?.geometry}
             className="min-h-[19rem] sm:min-h-[22rem] lg:min-h-[19rem] lg:flex-1"
           />
 
@@ -205,7 +262,7 @@ export default function CreateRoomPage() {
             <legend className="mb-2 text-sm font-bold"><Users className="mr-1.5 inline size-4" aria-hidden />최대 인원</legend>
             <div className="grid grid-cols-3 gap-2">
               {[2, 3, 4].map((count) => (
-                <label key={count} className="rounded-full border border-hairline bg-surface py-3 text-center text-sm font-semibold has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:text-primary-foreground">
+                <label key={count} className="rounded-full border border-hairline bg-surface py-3 text-center text-sm font-semibold has-[:checked]:border-primary has-[:checked]:bg-primary has-[:checked]:text-primary-foreground has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring">
                   <input className="sr-only" type="radio" name="maxParticipants" value={count} checked={maxParticipants === count} onChange={() => setMaxParticipants(count)} />
                   {count}명
                 </label>
@@ -213,7 +270,7 @@ export default function CreateRoomPage() {
             </div>
           </fieldset>
 
-          <RouteSummary estimate={estimate} loading={estimating} error={estimateError} participants={maxParticipants} onRetry={() => setEstimateRetry((value) => value + 1)} />
+          <RouteSummary estimate={displayedEstimate} loading={estimating} error={estimateError} expired={estimateExpired} participants={maxParticipants} onRetry={() => { setEstimateCheckedAt(Date.now()); setEstimateStale(false); setEstimateRetry((value) => value + 1) }} />
 
           {pending || state.message ? (
             <p className="min-h-5 text-sm text-destructive" aria-live="polite">
@@ -327,7 +384,7 @@ function DateTimePicker({
 
   return (
     <div className="rounded-[14px] border border-hairline bg-surface p-3 sm:p-4 lg:p-2.5" aria-label="출발 일시 선택기">
-      <div className="grid grid-cols-[minmax(4.75rem,1.35fr)_minmax(3.25rem,1fr)_minmax(3.25rem,1fr)] gap-2 sm:grid-cols-[minmax(4.75rem,0.9fr)_minmax(3.25rem,0.65fr)_minmax(3.25rem,0.65fr)_minmax(5.375rem,1.05fr)_minmax(3.25rem,0.65fr)_minmax(3.25rem,0.65fr)] sm:gap-1">
+      <div className="grid grid-cols-1 gap-2 min-[288px]:grid-cols-3 sm:grid-cols-6 sm:gap-1">
         <DateTimeWheel label="년" options={years} selected={year} onSelect={(next) => updateDate(next, month, day)} />
         <DateTimeWheel label="월" options={months} selected={month} onSelect={(next) => updateDate(year, next, day)} />
         <DateTimeWheel label="일" options={days} selected={day} onSelect={(next) => updateDate(year, month, next)} />
@@ -686,9 +743,10 @@ function PlaceSearch({ label, icon: Icon, selected, onSelect, error }: {
   </div>
 }
 
-function RouteSummary({ estimate, loading, error, participants, onRetry }: { estimate: RouteEstimate | null; loading: boolean; error: string; participants: number; onRetry: () => void }) {
+function RouteSummary({ estimate, loading, error, expired, participants, onRetry }: { estimate: RouteEstimate | null; loading: boolean; error: string; expired: boolean; participants: number; onRetry: () => void }) {
   if (loading) return <p className="rounded-[18px] bg-surface-subtle p-4 text-sm lg:p-2.5" role="status">경로와 예상 요금을 조회하는 중...</p>
   if (error) return <div className="rounded-[18px] border border-warning bg-warn-soft p-4 text-sm text-destructive lg:p-2.5" role="alert"><p>{error}</p><Button type="button" variant="secondary" size="sm" onClick={onRetry} className="mt-3">경로 다시 시도</Button></div>
+  if (expired) return <div className="rounded-[18px] border border-warning bg-warn-soft p-4 text-sm text-destructive lg:p-2.5" role="alert" aria-live="assertive"><p>예상 경로와 요금이 만료되었습니다. 최신 정보로 다시 조회한 뒤 방을 만들 수 있습니다.</p><Button type="button" variant="secondary" size="sm" onClick={onRetry} className="mt-3">경로 다시 조회</Button></div>
   if (!estimate) return null
   return <dl className="grid grid-cols-2 gap-4 rounded-[18px] border border-hairline bg-surface p-4 text-sm lg:gap-2 lg:p-2.5">
     <div><dt className="text-xs text-muted-foreground">거리 · 시간</dt><dd className="font-bold">{(estimate.distanceMeters / 1000).toFixed(1)}km · {Math.ceil(estimate.durationSeconds / 60)}분</dd></div>

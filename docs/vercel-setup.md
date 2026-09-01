@@ -6,7 +6,7 @@
 
 - Vercel scope: `thsus1214-7527s-projects`
 - Vercel project: `taxi-ta-share`
-- GitHub Repository: `https://github.com/LEE-JAKE-123/taxi-ta-share` (연결됨)
+- GitHub Repository: `https://github.com/LEE-JAKE-123/taxi-ta-share` (자동 연결 상태: 검증 필요)
 - Framework: Next.js
 - 로컬 연결 파일: `.vercel/project.json` 및 `.env.local`  
   두 파일은 비밀값 또는 개인 연결 정보를 포함할 수 있어 Git에 커밋하지 않는다.
@@ -38,7 +38,7 @@ vercel integration installations
 
 ## 현재 제한
 
-- GitHub 저장소 자동 연결은 Vercel 계정의 GitHub 저장소 권한이 없어 완료되지 않았다.
+- GitHub 저장소 자동 연결 상태는 이 문서 기준으로 검증되지 않았다. `vercel project inspect taxi-ta-share`와 Vercel 프로젝트 설정에서 확인해 결과와 확인일을 기록하기 전에는 연결됨으로 표시하지 않는다.
 - Development Neon 연결과 migration은 완료됐다.
 - Preview·Production 환경의 앱 전용 변수, DB fingerprint와 최소 권한 역할 검증은
   배포 준비 단계에서 별도로 구성한다.

@@ -7,6 +7,7 @@ import {
   canFallbackToAnotherProvider,
   preferredFallbackError,
 } from './fallback'
+import { getProviderSetting, type ProviderSetting } from './provider-setting'
 import type {
   Coordinates,
   PlaceResult,
@@ -14,18 +15,7 @@ import type {
   RoutingAdapter,
 } from './types'
 
-type ProviderSetting = 'naver' | 'kakao' | 'auto'
-
-export function getProviderSetting(): ProviderSetting {
-  const value = process.env.MAP_PROVIDER?.trim().toLowerCase() || 'auto'
-  if (value === 'naver' || value === 'kakao' || value === 'auto') {
-    return value
-  }
-  throw new RoutingError(
-    'NOT_CONFIGURED',
-    'MAP_PROVIDER 설정이 올바르지 않습니다.',
-  )
-}
+export { getProviderSetting } from './provider-setting'
 
 function adapters(): readonly RoutingAdapter[] {
   const setting = getProviderSetting()
